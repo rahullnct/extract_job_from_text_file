@@ -3,6 +3,12 @@ from django.shortcuts import render
 # Create your views here.
 import hashlib
 import re
+import calendar
+import re
+
+from datetime import timedelta
+
+from django.utils import timezone
 
 from datetime import datetime
 from io import BytesIO
@@ -109,9 +115,19 @@ TECHNOLOGY_PATTERNS = [
     (r"\bREST(?:ful)?\s*API(?:s)?\b", "REST API"),
 ]
 
+POSTED_TIME_PATTERN = re.compile(
+    r"^"
+    r"(\d+)"
+    r"\s+"
+    r"(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)"
+    r"\s+ago"
+    r"$",
+    re.IGNORECASE,
+)
+
 def is_header_noise_line(line):
     """
-    Returns True for Shine UI text that is not job title/company name.
+    Shine header UI text which is not job title/company.
     """
 
     if not line:
@@ -125,6 +141,7 @@ def is_header_noise_line(line):
         "actively hiring",
         "placeholder",
         "jobs for you",
+        "get app",
         "save icon",
         "share icon",
         "save iconshare icon",
@@ -137,68 +154,183 @@ def is_header_noise_line(line):
     if lower in exact_noise:
         return True
 
-    # Examples:
-    # 3 weeks ago
-    # 1 day ago
-    # 2 months ago
-    # 5 hours ago
-    if re.fullmatch(
-        r"\d+\s+"
-        r"(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)"
-        r"\s+ago",
-        lower,
-    ):
+    # Icon/UI-only lines
+    if "icon" in lower and len(value.split()) <= 6:
         return True
 
-    # Examples:
-    # posted 3 weeks ago
-    # posted 1 day ago
-    if re.fullmatch(
-        r"posted\s+\d+\s+"
-        r"(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)"
-        r"\s+ago",
-        lower,
-    ):
-        return True
-
-    # Remove icon-only lines.
-    if "icon" in lower and len(value.split()) <= 5:
-        return True
+    # IMPORTANT:
+    # Do NOT classify "2 months ago" here.
+    # We now need it separately as posted_date.
 
     return False
 
+def is_relative_posted_date(line):
+    """
+    Examples:
+    2 months ago
+    3 weeks ago
+    1 day ago
+    5 hours ago
+    """
+
+    if not line:
+        return False
+
+    return bool(
+        POSTED_TIME_PATTERN.fullmatch(
+            line.strip()
+        )
+    )
+
+def subtract_months(date_value, months):
+    """
+    Subtract calendar months safely.
+
+    Example:
+    2026-08-31 minus 1 month -> 2026-07-31
+    """
+
+    total_months = (
+        date_value.year * 12
+        + date_value.month
+        - 1
+        - months
+    )
+
+    year = total_months // 12
+    month = total_months % 12 + 1
+
+    last_day = calendar.monthrange(
+        year,
+        month,
+    )[1]
+
+    day = min(
+        date_value.day,
+        last_day,
+    )
+
+    return date_value.replace(
+        year=year,
+        month=month,
+        day=day,
+    )
+
+def convert_relative_posted_date(value):
+    """
+    Convert:
+
+    2 months ago
+    3 weeks ago
+    1 day ago
+
+    into YYYY-MM-DD.
+
+    The calculation uses the date when the TXT is processed.
+    """
+
+    if not value:
+        return ""
+
+    match = POSTED_TIME_PATTERN.fullmatch(
+        value.strip()
+    )
+
+    if not match:
+        return ""
+
+    amount = int(
+        match.group(1)
+    )
+
+    unit = (
+        match.group(2)
+        .lower()
+    )
+
+    now = timezone.localtime(
+        timezone.now()
+    )
+
+    if unit in {
+        "minute",
+        "minutes",
+    }:
+        result = now - timedelta(
+            minutes=amount
+        )
+
+    elif unit in {
+        "hour",
+        "hours",
+    }:
+        result = now - timedelta(
+            hours=amount
+        )
+
+    elif unit in {
+        "day",
+        "days",
+    }:
+        result = now - timedelta(
+            days=amount
+        )
+
+    elif unit in {
+        "week",
+        "weeks",
+    }:
+        result = now - timedelta(
+            weeks=amount
+        )
+
+    elif unit in {
+        "month",
+        "months",
+    }:
+        result = subtract_months(
+            now,
+            amount,
+        )
+
+    elif unit in {
+        "year",
+        "years",
+    }:
+        result = subtract_months(
+            now,
+            amount * 12,
+        )
+
+    else:
+        return ""
+
+    return result.strftime(
+        "%Y-%m-%d"
+    )
 
 def extract_job_header(text):
     """
-    Extract job title and company name from the main Shine job header.
+    Extract:
+        job_title
+        company_name
+        posted_date_raw
 
-    Expected patterns:
+    Example:
 
+    Profile
     ACTIVELY HIRING
-    Senior Full Stack (React + Python ) Developer Role
-    Fractal
+    .NET AWS Developer
+    Persistent Systems
     placeholder
-
-
-    OR
-
-    Profile
-    Python Developer
-    Vishwa karma
-    3 weeks ago
+    2 months ago
     save iconshare icon
     Job Details
 
-
-    OR
-
-    Profile
-    ACTIVELY HIRING
-    Python Developer with LLM - Fluper LTD
-    OpenTalent
-    3 weeks ago
-    save iconshare icon
-    Job Details
+    Returns:
+        .NET AWS Developer
+        Persistent Systems
+        2 months ago
     """
 
     text = normalize_text(text)
@@ -209,11 +341,7 @@ def extract_job_header(text):
         if line.strip()
     ]
 
-    # -----------------------------------------------------
-    # Find where the actual job header ends.
-    # Usually "Job Details" comes immediately after it.
-    # -----------------------------------------------------
-
+    # Find first "Job Details"
     job_details_index = None
 
     for index, line in enumerate(lines):
@@ -223,40 +351,77 @@ def extract_job_header(text):
             break
 
     if job_details_index is None:
-        return "", ""
+        return "", "", ""
 
-    # Only examine lines before Job Details.
-    before_job_details = lines[:job_details_index]
+    # Only look before Job Details
+    header_lines = lines[:job_details_index]
 
-    # We normally only need the last portion of the page header.
-    before_job_details = before_job_details[-20:]
+    # Only recent header area is needed
+    header_lines = header_lines[-25:]
+
+    # =====================================================
+    # 1. FIND POSTED DATE
+    # =====================================================
+
+    posted_date_raw = ""
+    posted_date_index = None
+
+    for index in range(
+        len(header_lines) - 1,
+        -1,
+        -1,
+    ):
+
+        line = header_lines[index]
+
+        if is_relative_posted_date(line):
+
+            posted_date_raw = line
+            posted_date_index = index
+            break
+
+    # =====================================================
+    # 2. ONLY LOOK BEFORE POSTED DATE FOR TITLE + COMPANY
+    # =====================================================
+
+    if posted_date_index is not None:
+
+        candidate_lines = header_lines[
+            :posted_date_index
+        ]
+
+    else:
+
+        candidate_lines = header_lines
 
     meaningful_lines = []
 
-    for line in before_job_details:
+    for line in candidate_lines:
 
         if is_header_noise_line(line):
             continue
 
         meaningful_lines.append(line)
 
-    # -----------------------------------------------------
-    # The final two meaningful lines immediately before
-    # Job Details are:
+    # =====================================================
+    # 3. LAST TWO MEANINGFUL LINES
     #
-    # job title
-    # company name
-    # -----------------------------------------------------
+    # JOB TITLE
+    # COMPANY NAME
+    # =====================================================
 
     if len(meaningful_lines) >= 2:
 
         job_title = meaningful_lines[-2]
         company_name = meaningful_lines[-1]
 
-        return job_title, company_name
+        return (
+            job_title,
+            company_name,
+            posted_date_raw,
+        )
 
-    return "", ""
-
+    return "", "", posted_date_raw
 
 # ============================================================
 # FILE DECODING
@@ -1049,7 +1214,11 @@ def extract_job_data(
         text
     )
 
-    job_title, company_name = extract_job_header(
+    (
+        job_title,
+        company_name,
+        posted_date_raw,
+    ) = extract_job_header(
         main_text
     )
 
@@ -1116,9 +1285,17 @@ def extract_job_data(
         job_description,
     )
 
-    posted_date = extract_posted_date(
-        main_text
+    posted_date = (
+        convert_relative_posted_date(
+            posted_date_raw
+        )
     )
+
+    if not posted_date:
+
+        posted_date = extract_posted_date(
+            main_text
+        )
 
     source_platform = (
         detect_source_platform(
