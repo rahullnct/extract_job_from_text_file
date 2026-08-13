@@ -1049,13 +1049,24 @@ def extract_job_data(
         text
     )
 
-    job_title = extract_job_title(
+    job_title, company_name = extract_job_header(
         main_text
     )
 
-    company_name = extract_company_name(
-        main_text
-    )
+    if not job_title:
+
+        job_title = get_label_value(
+            main_text,
+            "Designation",
+        )
+
+
+    if not company_name:
+
+        company_name = get_label_value(
+            main_text,
+            "Company Name",
+        )
 
     job_description = (
         extract_job_description(
