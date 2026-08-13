@@ -113,6 +113,35 @@ TECHNOLOGY_PATTERNS = [
     (r"\bDevOps\b", "DevOps"),
 
     (r"\bREST(?:ful)?\s*API(?:s)?\b", "REST API"),
+    (r"\bLLM(?:s)?\b", "LLM"),
+    (r"\bNLP\b", "NLP"),
+    (r"\bPyTorch\b", "PyTorch"),
+    (r"\bTensorFlow\b", "TensorFlow"),
+    (r"\bLangChain\b", "LangChain"),
+
+    (r"\bFastAPI\b", "FastAPI"),
+
+    (r"\bOpenAI\b", "OpenAI"),
+    (r"\bHugging Face\b", "Hugging Face"),
+
+    (r"\bRAG\b", "RAG"),
+
+    (r"\bPinecone\b", "Pinecone"),
+    (r"\bFAISS\b", "FAISS"),
+    (r"\bWeaviate\b", "Weaviate"),
+    (r"\bChromaDB\b", "ChromaDB"),
+
+    (r"\bAirflow\b", "Airflow"),
+    (r"\bPrefect\b", "Prefect"),
+
+    (r"\bNoSQL\b", "NoSQL"),
+
+    (r"\bMLOps\b", "MLOps"),
+
+    (r"\bLLaMA\b", "LLaMA"),
+    (r"\bFalcon\b", "Falcon"),
+    (r"\bMistral\b", "Mistral"),
+
 ]
 
 POSTED_TIME_PATTERN = re.compile(
@@ -694,8 +723,17 @@ def extract_job_description(text):
 def extract_experience(text):
 
     patterns = [
-        r"(\d+(?:\.\d+)?)\s*to\s*(\d+(?:\.\d+)?)\s*Yrs?",
-        r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*Yrs?",
+        r"(?:Experience\s*:\s*)?"
+        r"(\d+(?:\.\d+)?)"
+        r"\s*to\s*"
+        r"(\d+(?:\.\d+)?)"
+        r"\s*(?:Yrs?|Years?)",
+
+        r"(?:Experience\s*:\s*)?"
+        r"(\d+(?:\.\d+)?)"
+        r"\s*-\s*"
+        r"(\d+(?:\.\d+)?)"
+        r"\s*(?:Yrs?|Years?)",
     ]
 
     for pattern in patterns:
@@ -723,7 +761,7 @@ def extract_experience(text):
                 maximum = int(maximum)
 
             return (
-                f"{minimum} to {maximum} Yrs",
+                f"{minimum} to {maximum} Years",
                 minimum,
                 maximum,
             )
@@ -754,6 +792,141 @@ def extract_experience(text):
 
     return "", "", ""
 
+def extract_linkedin_employment_type(text):
+
+    allowed_types = {
+        "full-time": "Full-time",
+        "full time": "Full-time",
+
+        "part-time": "Part-time",
+        "part time": "Part-time",
+
+        "internship": "Internship",
+
+        "contract": "Contract",
+
+        "temporary": "Temporary",
+
+        "freelance": "Freelance",
+    }
+
+    lines = [
+        line.strip()
+        for line in text.split("\n")
+        if line.strip()
+    ]
+
+    for line in lines[:30]:
+
+        normalized = line.lower()
+
+        if normalized in allowed_types:
+
+            return allowed_types[
+                normalized
+            ]
+
+    # Fallback from description:
+    #
+    # Job Type: Full Time
+
+    value = get_label_value(
+        text,
+        "Job Type",
+    )
+
+    if value:
+
+        lower_value = value.lower()
+
+        return allowed_types.get(
+            lower_value,
+            value,
+        )
+
+    return ""
+
+def parse_linkedin_location(location):
+
+    if not location:
+        return "", "", ""
+
+    location = re.sub(
+        r"\([^)]*\)",
+        "",
+        location,
+    ).strip()
+
+    parts = [
+        part.strip()
+        for part in location.split(",")
+        if part.strip()
+    ]
+
+    city = ""
+    state = ""
+    country = ""
+
+    if len(parts) >= 1:
+        city = parts[0]
+
+    if len(parts) >= 2:
+        state = parts[1]
+
+    if len(parts) >= 3:
+        country = parts[-1]
+
+    return (
+        city,
+        state,
+        country,
+    )
+
+def detect_linkedin_remote_type(text):
+
+    lower = text.lower()
+
+    if (
+        "(remote)" in lower
+        or " remote " in f" {lower} "
+    ):
+        return "Remote"
+
+    if (
+        "(hybrid)" in lower
+        or " hybrid " in f" {lower} "
+    ):
+        return "Hybrid"
+
+    if (
+        "(on-site)" in lower
+        or "(onsite)" in lower
+        or "on-site" in lower
+    ):
+        return "Onsite"
+
+    return ""
+
+def extract_linkedin_job_category(
+    text,
+    job_title,
+    job_description,
+):
+
+    explicit_category = (
+        get_label_value(
+            text,
+            "Job Category",
+        )
+    )
+
+    if explicit_category:
+        return explicit_category
+
+    return detect_job_category(
+        job_title,
+        job_description,
+    )
 
 # ============================================================
 # SALARY
@@ -1098,38 +1271,253 @@ def detect_source_platform(
     text,
     source_url,
 ):
-
     combined = (
         f"{text} {source_url}"
     ).lower()
 
+    # LinkedIn
+    if (
+        "linkedin.com" in combined
+        or "linkedin corporation" in combined
+        or "responses managed off linkedin" in combined
+        or "get job alerts for this search" in combined
+    ):
+        return "LinkedIn"
+
+    # Shine
     if (
         "shine.com" in combined
         or "shine logo" in combined
     ):
         return "Shine"
 
-    if "linkedin.com" in combined:
-        return "LinkedIn"
-
-    if "indeed.com" in combined:
+    # Indeed
+    if (
+        "indeed.com" in combined
+        or "indeed" in combined
+    ):
         return "Indeed"
 
-    if "naukri.com" in combined:
+    # Naukri
+    if (
+        "naukri.com" in combined
+        or "naukri" in combined
+    ):
         return "Naukri"
 
+    # Greenhouse
     if "greenhouse" in combined:
         return "Greenhouse"
 
+    # Lever
     if "lever.co" in combined:
         return "Lever"
 
     return "Other"
 
-
 # ============================================================
 # SOURCE TYPE
 # ============================================================
+
+def isolate_linkedin_job_text(text):
+    """
+    Keep only the currently opened LinkedIn job.
+
+    Everything before:
+        Get job alerts for this search
+
+    belongs to search results/navigation.
+
+    Everything after:
+        Job search faster with Premium
+
+    is unrelated LinkedIn UI.
+    """
+
+    start_markers = [
+        "Get job alerts for this search",
+    ]
+
+    end_markers = [
+        "Job search faster with Premium",
+        "MessagingYou are on the messaging overlay",
+    ]
+
+    lower_text = text.lower()
+
+    start_position = None
+    matched_marker = ""
+
+    for marker in start_markers:
+
+        position = lower_text.find(
+            marker.lower()
+        )
+
+        if position != -1:
+
+            start_position = position
+            matched_marker = marker
+            break
+
+    if start_position is not None:
+
+        text = text[
+            start_position
+            + len(matched_marker):
+        ]
+
+    lower_text = text.lower()
+
+    end_positions = []
+
+    for marker in end_markers:
+
+        position = lower_text.find(
+            marker.lower()
+        )
+
+        if position != -1:
+            end_positions.append(
+                position
+            )
+
+    if end_positions:
+
+        text = text[
+            :min(end_positions)
+        ]
+
+    return text.strip()
+
+def extract_linkedin_header(text):
+    """
+    LinkedIn selected job format:
+
+    Company Name
+    Job Title
+    Location · posted date · applicant information
+
+    Example:
+
+    Netlink Computer Inc
+    Python Developer
+    Bhopal, Madhya Pradesh, India · 4 days ago ·
+    Over 100 people clicked apply
+    """
+
+    lines = [
+        line.strip()
+        for line in text.split("\n")
+        if line.strip()
+    ]
+
+    if len(lines) < 2:
+        return "", "", "", ""
+
+    company_name = lines[0]
+    job_title = lines[1]
+
+    location = ""
+    posted_date_raw = ""
+
+    # Search only the initial LinkedIn header area.
+    for line in lines[2:15]:
+
+        relative_match = re.search(
+            r"\b"
+            r"\d+\s+"
+            r"(?:minute|minutes|hour|hours|day|days|"
+            r"week|weeks|month|months|year|years)"
+            r"\s+ago"
+            r"\b",
+            line,
+            flags=re.IGNORECASE,
+        )
+
+        if relative_match:
+
+            posted_date_raw = (
+                relative_match.group(0)
+            )
+
+            # Everything before the first ·
+            # is normally location.
+            if "·" in line:
+
+                location = (
+                    line.split("·", 1)[0]
+                    .strip()
+                )
+
+            break
+
+    return (
+        job_title,
+        company_name,
+        location,
+        posted_date_raw,
+    )
+
+def extract_linkedin_job_description(text):
+    """
+    Extract everything after 'About the job'.
+    """
+
+    lower_text = text.lower()
+
+    marker = "about the job"
+
+    position = lower_text.find(
+        marker
+    )
+
+    if position == -1:
+        return ""
+
+    description = text[
+        position + len(marker):
+    ]
+
+    end_markers = [
+        "Job search faster with Premium",
+        "See jobs where you’re a top applicant",
+        "See jobs where you're a top applicant",
+    ]
+
+    lower_description = (
+        description.lower()
+    )
+
+    end_positions = []
+
+    for end_marker in end_markers:
+
+        end_position = (
+            lower_description.find(
+                end_marker.lower()
+            )
+        )
+
+        if end_position != -1:
+            end_positions.append(
+                end_position
+            )
+
+    if end_positions:
+
+        description = description[
+            :min(end_positions)
+        ]
+
+    description = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        description,
+    )
+
+    return description.strip()
+
 
 def determine_source_type(
     source_platform,
@@ -1206,103 +1594,621 @@ def extract_job_data(
     source_url,
 ):
 
+    # =====================================================
+    # 1. NORMALIZE RAW TEXT
+    # =====================================================
+
     text = normalize_text(
         raw_text
     )
 
-    main_text = isolate_main_job_text(
-        text
-    )
-
-    (
-        job_title,
-        company_name,
-        posted_date_raw,
-    ) = extract_job_header(
-        main_text
-    )
-
-    if not job_title:
-
-        job_title = get_label_value(
-            main_text,
-            "Designation",
-        )
-
-
-    if not company_name:
-
-        company_name = get_label_value(
-            main_text,
-            "Company Name",
-        )
-
-    job_description = (
-        extract_job_description(
-            main_text
-        )
-    )
-
-    (
-        experience_required,
-        experience_min,
-        experience_max,
-    ) = extract_experience(
-        main_text
-    )
-
-    (
-        salary_min,
-        salary_max,
-        salary_currency,
-    ) = extract_salary(
-        main_text
-    )
-
-    (
-        location,
-        city,
-    ) = extract_locations(
-        main_text
-    )
-
-    skills = extract_skills(
-        job_description
-    )
-
-    remote_type = detect_remote_type(
-        main_text
-    )
-
-    employment_type = (
-        extract_employment_type(
-            main_text
-        )
-    )
-
-    category = detect_job_category(
-        job_title,
-        job_description,
-    )
-
-    posted_date = (
-        convert_relative_posted_date(
-            posted_date_raw
-        )
-    )
-
-    if not posted_date:
-
-        posted_date = extract_posted_date(
-            main_text
-        )
+    # =====================================================
+    # 2. DETECT SOURCE PLATFORM FIRST
+    # =====================================================
+    #
+    # IMPORTANT:
+    # We must detect the portal before running
+    # portal-specific extraction.
+    #
+    # Shine and LinkedIn have different page structures.
+    # =====================================================
 
     source_platform = (
         detect_source_platform(
-            main_text,
+            text,
             source_url,
         )
     )
+
+    # =====================================================
+    # DEFAULT VALUES
+    # =====================================================
+
+    job_title = ""
+    company_name = ""
+    company_website = ""
+
+    job_description = ""
+    skills = ""
+
+    experience_required = ""
+    experience_min = ""
+    experience_max = ""
+
+    salary_min = ""
+    salary_max = ""
+    salary_currency = ""
+
+    location = ""
+    city = ""
+    state = ""
+    country = ""
+
+    remote_type = ""
+    employment_type = ""
+    category = ""
+
+    posted_date = ""
+
+    apply_url = ""
+
+    # =====================================================
+    # 3. LINKEDIN EXTRACTION
+    # =====================================================
+
+    if source_platform == "LinkedIn":
+
+        # -------------------------------------------------
+        # Remove LinkedIn search-result jobs and keep only
+        # the currently opened job.
+        # -------------------------------------------------
+
+        main_text = (
+            isolate_linkedin_job_text(
+                text
+            )
+        )
+
+        # -------------------------------------------------
+        # LINKEDIN HEADER
+        #
+        # Example:
+        #
+        # Netlink Computer Inc
+        # Python Developer
+        # Bhopal, Madhya Pradesh, India · 4 days ago ...
+        #
+        # LinkedIn order:
+        #
+        # company_name
+        # job_title
+        # location + posted_date
+        # -------------------------------------------------
+
+        (
+            job_title,
+            company_name,
+            location,
+            posted_date_raw,
+        ) = extract_linkedin_header(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # JOB DESCRIPTION
+        # -------------------------------------------------
+
+        job_description = (
+            extract_linkedin_job_description(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # EXPERIENCE
+        #
+        # Example:
+        #
+        # Experience: 2 to 7 Years
+        # -------------------------------------------------
+
+        (
+            experience_required,
+            experience_min,
+            experience_max,
+        ) = extract_experience(
+            job_description
+        )
+
+        # Fallback:
+        # sometimes experience can be outside
+        # About the job description.
+        if not experience_required:
+
+            (
+                experience_required,
+                experience_min,
+                experience_max,
+            ) = extract_experience(
+                main_text
+            )
+
+        # -------------------------------------------------
+        # SALARY
+        # -------------------------------------------------
+
+        (
+            salary_min,
+            salary_max,
+            salary_currency,
+        ) = extract_salary(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # LOCATION
+        #
+        # Example:
+        #
+        # Bhopal, Madhya Pradesh, India
+        #
+        # city    = Bhopal
+        # state   = Madhya Pradesh
+        # country = India
+        # -------------------------------------------------
+
+        (
+            city,
+            state,
+            country,
+        ) = parse_linkedin_location(
+            location
+        )
+
+        # -------------------------------------------------
+        # SKILLS
+        # -------------------------------------------------
+
+        skills = extract_skills(
+            job_description
+        )
+
+        # -------------------------------------------------
+        # REMOTE TYPE
+        # -------------------------------------------------
+
+        remote_type = (
+            detect_linkedin_remote_type(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # EMPLOYMENT TYPE
+        #
+        # Example:
+        #
+        # Full-time
+        #
+        # OR
+        #
+        # Job Type: Full Time
+        # -------------------------------------------------
+
+        employment_type = (
+            extract_linkedin_employment_type(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # JOB CATEGORY
+        #
+        # Prefer explicit:
+        #
+        # Job Category: Development
+        #
+        # otherwise derive from title/description.
+        # -------------------------------------------------
+
+        category = (
+            extract_linkedin_job_category(
+                main_text,
+                job_title,
+                job_description,
+            )
+        )
+
+        # -------------------------------------------------
+        # POSTED DATE
+        #
+        # Example:
+        #
+        # 4 days ago
+        # -------------------------------------------------
+
+        posted_date = (
+            convert_relative_posted_date(
+                posted_date_raw
+            )
+        )
+
+        # -------------------------------------------------
+        # COMPANY WEBSITE
+        # -------------------------------------------------
+
+        company_website = (
+            extract_company_website(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # APPLY URL
+        #
+        # Normally copied LinkedIn text will not contain
+        # the real application URL.
+        # -------------------------------------------------
+
+        apply_url = get_label_value(
+            main_text,
+            [
+                "Apply URL",
+                "Application URL",
+            ],
+        )
+
+    # =====================================================
+    # 4. SHINE EXTRACTION
+    # =====================================================
+
+    elif source_platform == "Shine":
+
+        # -------------------------------------------------
+        # Remove Similar Jobs and footer.
+        # -------------------------------------------------
+
+        main_text = (
+            isolate_main_job_text(
+                text
+            )
+        )
+
+        # -------------------------------------------------
+        # SHINE HEADER
+        #
+        # Example:
+        #
+        # ACTIVELY HIRING
+        # .NET AWS Developer
+        # Persistent Systems
+        # placeholder
+        # 2 months ago
+        #
+        # Shine order:
+        #
+        # job_title
+        # company_name
+        # posted_date
+        # -------------------------------------------------
+
+        (
+            job_title,
+            company_name,
+            posted_date_raw,
+        ) = extract_job_header(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # JOB TITLE FALLBACK
+        # -------------------------------------------------
+
+        if not job_title:
+
+            job_title = get_label_value(
+                main_text,
+                "Designation",
+            )
+
+        # -------------------------------------------------
+        # COMPANY NAME FALLBACK
+        # -------------------------------------------------
+
+        if not company_name:
+
+            company_name = (
+                get_label_value(
+                    main_text,
+                    "Company Name",
+                )
+            )
+
+        # -------------------------------------------------
+        # JOB DESCRIPTION
+        # -------------------------------------------------
+
+        job_description = (
+            extract_job_description(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # EXPERIENCE
+        # -------------------------------------------------
+
+        (
+            experience_required,
+            experience_min,
+            experience_max,
+        ) = extract_experience(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # SALARY
+        # -------------------------------------------------
+
+        (
+            salary_min,
+            salary_max,
+            salary_currency,
+        ) = extract_salary(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # LOCATION
+        # -------------------------------------------------
+
+        (
+            location,
+            city,
+        ) = extract_locations(
+            main_text
+        )
+
+        # Shine copied text does not safely provide
+        # structured state/country in all cases.
+
+        state = ""
+        country = ""
+
+        # -------------------------------------------------
+        # SKILLS
+        # -------------------------------------------------
+
+        skills = extract_skills(
+            job_description
+        )
+
+        # -------------------------------------------------
+        # REMOTE TYPE
+        # -------------------------------------------------
+
+        remote_type = (
+            detect_remote_type(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # EMPLOYMENT TYPE
+        # -------------------------------------------------
+
+        employment_type = (
+            extract_employment_type(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # JOB CATEGORY
+        # -------------------------------------------------
+
+        category = (
+            detect_job_category(
+                job_title,
+                job_description,
+            )
+        )
+
+        # -------------------------------------------------
+        # POSTED DATE
+        #
+        # First try:
+        #
+        # 2 months ago
+        # 3 weeks ago
+        # -------------------------------------------------
+
+        posted_date = (
+            convert_relative_posted_date(
+                posted_date_raw
+            )
+        )
+
+        # Fallback:
+        #
+        # Date: 06/27/2026
+        # -------------------------------------------------
+
+        if not posted_date:
+
+            posted_date = (
+                extract_posted_date(
+                    main_text
+                )
+            )
+
+        # -------------------------------------------------
+        # COMPANY WEBSITE
+        # -------------------------------------------------
+
+        company_website = (
+            extract_company_website(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # APPLY URL
+        # -------------------------------------------------
+
+        apply_url = get_label_value(
+            main_text,
+            [
+                "Apply URL",
+                "Application URL",
+            ],
+        )
+
+    # =====================================================
+    # 5. OTHER JOB PORTALS
+    # =====================================================
+    #
+    # This is only a generic fallback.
+    #
+    # Later we can add:
+    #
+    # elif source_platform == "Indeed":
+    #
+    # elif source_platform == "Naukri":
+    #
+    # elif source_platform == "Foundit":
+    #
+    # etc.
+    # =====================================================
+
+    else:
+
+        main_text = text
+
+        # -------------------------------------------------
+        # Try generic labelled fields.
+        # -------------------------------------------------
+
+        job_title = get_label_value(
+            main_text,
+            [
+                "Job Title",
+                "Designation",
+            ],
+        )
+
+        company_name = get_label_value(
+            main_text,
+            [
+                "Company Name",
+                "Company",
+            ],
+        )
+
+        company_website = (
+            extract_company_website(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # Try generic job description.
+        # -------------------------------------------------
+
+        job_description = (
+            extract_job_description(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # EXPERIENCE
+        # -------------------------------------------------
+
+        (
+            experience_required,
+            experience_min,
+            experience_max,
+        ) = extract_experience(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # SALARY
+        # -------------------------------------------------
+
+        (
+            salary_min,
+            salary_max,
+            salary_currency,
+        ) = extract_salary(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # SKILLS
+        # -------------------------------------------------
+
+        skills = extract_skills(
+            job_description
+        )
+
+        # -------------------------------------------------
+        # REMOTE TYPE
+        # -------------------------------------------------
+
+        remote_type = (
+            detect_remote_type(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # EMPLOYMENT TYPE
+        # -------------------------------------------------
+
+        employment_type = (
+            extract_employment_type(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # CATEGORY
+        # -------------------------------------------------
+
+        category = (
+            detect_job_category(
+                job_title,
+                job_description,
+            )
+        )
+
+        # -------------------------------------------------
+        # DATE
+        # -------------------------------------------------
+
+        posted_date = (
+            extract_posted_date(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # APPLY URL
+        # -------------------------------------------------
+
+        apply_url = get_label_value(
+            main_text,
+            [
+                "Apply URL",
+                "Application URL",
+            ],
+        )
+
+    # =====================================================
+    # 6. COMMON DATA FOR ALL JOB PORTALS
+    # =====================================================
 
     source_type = (
         determine_source_type(
@@ -1310,9 +2216,21 @@ def extract_job_data(
         )
     )
 
+    # =====================================================
+    # SOURCE SCORE
+    #
+    # ats_api      = 60
+    # career_page  = 40
+    # job_portal   = 30
+    # =====================================================
+
     score = get_source_score(
         source_type
     )
+
+    # =====================================================
+    # INTERNAL JOB ID
+    # =====================================================
 
     internal_job_id = (
         generate_internal_job_id(
@@ -1321,8 +2239,13 @@ def extract_job_data(
         )
     )
 
+    # =====================================================
+    # JOB ID
+    # =====================================================
+
     platform_prefix = (
-        source_platform.lower()
+        source_platform
+        .lower()
         .replace(" ", "_")
     )
 
@@ -1331,7 +2254,18 @@ def extract_job_data(
         f"{internal_job_id[:16]}"
     )
 
-    now = timezone.now().isoformat()
+    # =====================================================
+    # CURRENT FETCH / UPDATE TIME
+    # =====================================================
+
+    now = (
+        timezone.now()
+        .isoformat()
+    )
+
+    # =====================================================
+    # 7. FINAL COMMON JOB DATA
+    # =====================================================
 
     job_data = {
 
@@ -1348,9 +2282,7 @@ def extract_job_data(
             company_name,
 
         "company_website":
-            extract_company_website(
-                main_text
-            ),
+            company_website,
 
         "job_description":
             job_description,
@@ -1382,13 +2314,11 @@ def extract_job_data(
         "city":
             city,
 
-        # Not safely available from the sample.
         "state":
-            "",
+            state,
 
-        # Can later be enriched.
         "country":
-            "",
+            country,
 
         "remote_type":
             remote_type,
@@ -1409,13 +2339,7 @@ def extract_job_data(
             "",
 
         "apply_url":
-            get_label_value(
-                main_text,
-                [
-                    "Apply URL",
-                    "Application URL",
-                ],
-            ),
+            apply_url,
 
         "updated_at":
             now,
@@ -1423,8 +2347,8 @@ def extract_job_data(
         "fetched_at":
             now,
 
-        # Initial value.
-        # Your Job Filtering AI can modify this later.
+        # Initially False.
+        # Fake-job validation can update this later.
         "is_fake":
             False,
 
@@ -1445,7 +2369,6 @@ def extract_job_data(
     }
 
     return job_data
-
 
 # ============================================================
 # CREATE EXCEL
