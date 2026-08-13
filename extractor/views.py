@@ -1392,18 +1392,32 @@ def isolate_linkedin_job_text(text):
 
 def extract_linkedin_header(text):
     """
-    LinkedIn selected job format:
+    Extract LinkedIn selected-job header.
 
-    Company Name
-    Job Title
-    Location · posted date · applicant information
+    Supported examples:
 
-    Example:
+    Example 1:
+        Company logo for, Flourishers Edge.
+        Flourishers Edge
+        Front End Developer
+        Bhopal, Madhya Pradesh, India · 1 month ago ...
 
-    Netlink Computer Inc
-    Python Developer
-    Bhopal, Madhya Pradesh, India · 4 days ago ·
-    Over 100 people clicked apply
+    Example 2:
+        Company logo for, PwC India.
+        PwC India
+        Senior Associate
+        Bhopal, Madhya Pradesh, India · Reposted 3 days ago ...
+
+    Example 3:
+        Netlink Computer Inc
+        Python Developer
+        Bhopal, Madhya Pradesh, India · 4 days ago ...
+
+    Returns:
+        job_title
+        company_name
+        location
+        posted_date_raw
     """
 
     lines = [
@@ -1415,20 +1429,85 @@ def extract_linkedin_header(text):
     if len(lines) < 2:
         return "", "", "", ""
 
+    # =====================================================
+    # REMOVE LINKEDIN COMPANY-LOGO ACCESSIBILITY TEXT
+    # =====================================================
+    #
+    # Example:
+    #
+    # Company logo for, Flourishers Edge.
+    # Flourishers Edge
+    #
+    # The first line is NOT the company name.
+    # =====================================================
+
+    cleaned_lines = []
+
+    company_logo_pattern = re.compile(
+        r"^Company\s+logo\s+for,\s*(.+?)\.?$",
+        re.IGNORECASE,
+    )
+
+    for line in lines:
+
+        match = company_logo_pattern.match(
+            line
+        )
+
+        if match:
+            # Skip accessibility/UI logo line.
+            continue
+
+        cleaned_lines.append(
+            line
+        )
+
+    lines = cleaned_lines
+
+    if len(lines) < 2:
+        return "", "", "", ""
+
+    # =====================================================
+    # COMPANY + JOB TITLE
+    # =====================================================
+    #
+    # After removing logo text LinkedIn becomes:
+    #
+    # Flourishers Edge
+    # Front End Developer
+    #
+    # OR:
+    #
+    # Netlink Computer Inc
+    # Python Developer
+    # =====================================================
+
     company_name = lines[0]
     job_title = lines[1]
 
     location = ""
     posted_date_raw = ""
 
-    # Search only the initial LinkedIn header area.
+    # =====================================================
+    # LOCATION + POSTED DATE
+    # =====================================================
+
     for line in lines[2:15]:
+
+        # Supports:
+        #
+        # 4 days ago
+        # 1 month ago
+        # Reposted 3 days ago
+        # Posted 2 weeks ago
 
         relative_match = re.search(
             r"\b"
-            r"\d+\s+"
-            r"(?:minute|minutes|hour|hours|day|days|"
-            r"week|weeks|month|months|year|years)"
+            r"(?:Reposted\s+|Posted\s+)?"
+            r"(\d+)\s+"
+            r"(minute|minutes|hour|hours|"
+            r"day|days|week|weeks|"
+            r"month|months|year|years)"
             r"\s+ago"
             r"\b",
             line,
@@ -1437,16 +1516,28 @@ def extract_linkedin_header(text):
 
         if relative_match:
 
+            # We only want:
+            #
+            # 3 days ago
+            #
+            # instead of:
+            #
+            # Reposted 3 days ago
+
             posted_date_raw = (
-                relative_match.group(0)
+                f"{relative_match.group(1)} "
+                f"{relative_match.group(2)} ago"
             )
 
-            # Everything before the first ·
-            # is normally location.
+            # LinkedIn location is before first:
+            # ·
             if "·" in line:
 
                 location = (
-                    line.split("·", 1)[0]
+                    line.split(
+                        "·",
+                        1,
+                    )[0]
                     .strip()
                 )
 
