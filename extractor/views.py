@@ -142,6 +142,13 @@ TECHNOLOGY_PATTERNS = [
     (r"\bFalcon\b", "Falcon"),
     (r"\bMistral\b", "Mistral"),
 
+    (r"\bWordPress\b", "WordPress"),
+    (r"\bShopify\b", "Shopify"),
+    (r"\bElementor\b", "Elementor"),
+    (r"\bBricks\b", "Bricks"),
+    (r"\bUI\s*/\s*UX\b", "UI/UX"),
+    (r"\bWeb Development\b", "Web Development"),
+    (r"\bE-commerce\b", "E-commerce"),
 ]
 
 POSTED_TIME_PATTERN = re.compile(
@@ -695,6 +702,41 @@ def extract_company_name(text):
 # JOB DESCRIPTION
 # ============================================================
 
+def extract_indeed_job_description(text):
+    """
+    Extract everything after:
+
+        Full job description
+    """
+
+    match = re.search(
+        r"Full\s+job\s+description",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if not match:
+        return ""
+
+    description = text[
+        match.end():
+    ]
+
+    # Clean HTML-like copied artifacts.
+    description = description.replace(
+        "&nbsp;",
+        " ",
+    )
+
+    description = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        description,
+    )
+
+    return description.strip()
+
+
 def extract_job_description(text):
 
     description = extract_section(
@@ -716,9 +758,102 @@ def extract_job_description(text):
     return description.strip()
 
 
+
 # ============================================================
 # EXPERIENCE
 # ============================================================
+
+def extract_indeed_experience(text):
+
+    # =====================================================
+    # RANGE
+    #
+    # 2 to 5 Years
+    # 2 - 5 years
+    # =====================================================
+
+    range_patterns = [
+        (
+            r"(\d+(?:\.\d+)?)"
+            r"\s*to\s*"
+            r"(\d+(?:\.\d+)?)"
+            r"\s*(?:years?|yrs?)"
+        ),
+
+        (
+            r"(\d+(?:\.\d+)?)"
+            r"\s*-\s*"
+            r"(\d+(?:\.\d+)?)"
+            r"\s*(?:years?|yrs?)"
+        ),
+    ]
+
+    for pattern in range_patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+
+            minimum = float(
+                match.group(1)
+            )
+
+            maximum = float(
+                match.group(2)
+            )
+
+            if minimum.is_integer():
+                minimum = int(minimum)
+
+            if maximum.is_integer():
+                maximum = int(maximum)
+
+            return (
+                f"{minimum} to {maximum} Years",
+                minimum,
+                maximum,
+            )
+
+    # =====================================================
+    # MINIMUM / PLUS EXPERIENCE
+    #
+    # 3+ years experience
+    # Minimum 3+ years
+    # minimum 5 years
+    # =====================================================
+
+    plus_match = re.search(
+        r"(?:minimum\s+)?"
+        r"(\d+(?:\.\d+)?)"
+        r"\s*\+\s*"
+        r"(?:years?|yrs?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if plus_match:
+
+        minimum = float(
+            plus_match.group(1)
+        )
+
+        if minimum.is_integer():
+            minimum = int(minimum)
+
+        return (
+            f"{minimum}+ Years",
+            minimum,
+            "",
+        )
+
+    # Generic fallback
+    return extract_experience(
+        text
+    )
 
 def extract_experience(text):
 
@@ -932,6 +1067,67 @@ def extract_linkedin_job_category(
 # SALARY
 # ============================================================
 
+def extract_indeed_salary(text):
+    """
+    Supported example:
+
+        ₹30,000 - ₹50,000 a month
+
+    Because our schema has no salary_period,
+    monthly salaries are normalized to annual INR.
+    """
+
+    pattern = (
+        r"(?:₹|Rs\.?)\s*"
+        r"([\d,]+(?:\.\d+)?)"
+        r"\s*(?:-|–|—|to)\s*"
+        r"(?:₹|Rs\.?)?\s*"
+        r"([\d,]+(?:\.\d+)?)"
+        r"\s*"
+        r"(?:a|per)?\s*"
+        r"(month|year|annum)"
+    )
+
+    match = re.search(
+        pattern,
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if not match:
+        return "", "", ""
+
+    minimum = float(
+        match.group(1).replace(
+            ",",
+            "",
+        )
+    )
+
+    maximum = float(
+        match.group(2).replace(
+            ",",
+            "",
+        )
+    )
+
+    period = (
+        match.group(3)
+        .lower()
+    )
+
+    # Normalize monthly salary to annual.
+    if period == "month":
+
+        minimum *= 12
+        maximum *= 12
+
+    return (
+        int(minimum),
+        int(maximum),
+        "INR",
+    )
+
 def extract_salary(text):
 
     # Example:
@@ -1039,6 +1235,38 @@ def extract_locations(text):
 # REMOTE TYPE
 # ============================================================
 
+def detect_indeed_remote_type(
+    text,
+    header_remote_type="",
+):
+
+    if header_remote_type:
+        return header_remote_type
+
+    lower = text.lower()
+
+    if (
+        "work location: remote" in lower
+        or "work from home" in lower
+        or "remote in " in lower
+    ):
+        return "Remote"
+
+    if (
+        "hybrid work in " in lower
+        or "work location: hybrid" in lower
+    ):
+        return "Hybrid"
+
+    if (
+        "work location: in person" in lower
+        or "on-site" in lower
+        or "onsite" in lower
+    ):
+        return "Onsite"
+
+    return ""
+
 def detect_remote_type(text):
 
     lower = text.lower()
@@ -1070,6 +1298,84 @@ def detect_remote_type(text):
 # ============================================================
 # EMPLOYMENT TYPE
 # ============================================================
+
+def extract_indeed_employment_type(text):
+
+    lines = [
+        line.strip()
+        for line in text.split("\n")
+        if line.strip()
+        and line.strip() != "&nbsp;"
+    ]
+
+    allowed_types = {
+        "full-time": "Full-time",
+        "full time": "Full-time",
+
+        "part-time": "Part-time",
+        "part time": "Part-time",
+
+        "internship": "Internship",
+
+        "contract": "Contract",
+
+        "temporary": "Temporary",
+
+        "freelance": "Freelance",
+    }
+
+    # =====================================================
+    # First check:
+    #
+    # Job type
+    # Full-time
+    # =====================================================
+
+    for index, line in enumerate(lines):
+
+        if line.lower() == "job type":
+
+            if index + 1 < len(lines):
+
+                value = (
+                    lines[index + 1]
+                    .lower()
+                )
+
+                if value in allowed_types:
+
+                    return allowed_types[
+                        value
+                    ]
+
+    # =====================================================
+    # Second check:
+    #
+    # Job Type: Full-time
+    # =====================================================
+
+    match = re.search(
+        r"Job\s+Type\s*:\s*([^\n]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if match:
+
+        value = (
+            match.group(1)
+            .strip()
+            .lower()
+        )
+
+        if value in allowed_types:
+
+            return allowed_types[
+                value
+            ]
+
+    return ""
+
 
 def extract_employment_type(text):
 
@@ -1266,11 +1572,11 @@ def extract_company_website(text):
 # ============================================================
 # SOURCE PLATFORM
 # ============================================================
-
 def detect_source_platform(
     text,
     source_url,
 ):
+
     combined = (
         f"{text} {source_url}"
     ).lower()
@@ -1294,7 +1600,9 @@ def detect_source_platform(
     # Indeed
     if (
         "indeed.com" in combined
-        or "indeed" in combined
+        or "job post details" in combined
+        or "full job description" in combined
+        and "return to search result" in combined
     ):
         return "Indeed"
 
@@ -1314,6 +1622,7 @@ def detect_source_platform(
         return "Lever"
 
     return "Other"
+
 
 # ============================================================
 # SOURCE TYPE
@@ -1675,6 +1984,213 @@ def generate_internal_job_id(
 
     return digest[:32]
 
+
+def isolate_indeed_job_text(text):
+    """
+    Keep only the currently selected Indeed job.
+
+    Start:
+        Return to Search ResultJob Post Details
+
+    End:
+        Return to Search Result
+    """
+
+    # Handles:
+    #
+    # Return to Search ResultJob Post Details
+    #
+    # OR:
+    #
+    # Return to Search Result Job Post Details
+
+    start_match = re.search(
+        r"Return\s+to\s+Search\s+Result\s*"
+        r"Job\s+Post\s+Details",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if not start_match:
+        return text.strip()
+
+    job_text = text[
+        start_match.end():
+    ]
+
+    # Find the NEXT Return to Search Result,
+    # which appears after the full selected job.
+
+    end_match = re.search(
+        r"(?:^|\n)\s*"
+        r"Return\s+to\s+Search\s+Result\b",
+        job_text,
+        flags=re.IGNORECASE,
+    )
+
+    if end_match:
+
+        job_text = job_text[
+            :end_match.start()
+        ]
+
+    return job_text.strip()
+
+def extract_indeed_header(text):
+    """
+    Example:
+
+    Full stack Web Developer Minimum 3+ years of Experience
+    on Bricks & Elementor UI/UX (WFH)- job post
+
+    COMTREK
+
+    Mumbai, Maharashtra•Remote
+
+    ₹30,000 - ₹50,000 a month
+
+
+    Returns:
+
+    job_title
+    company_name
+    location
+    remote_type
+    """
+
+    lines = [
+        line.strip()
+        for line in text.split("\n")
+        if line.strip()
+    ]
+
+    if len(lines) < 2:
+        return "", "", "", ""
+
+    # =====================================================
+    # JOB TITLE
+    # =====================================================
+
+    job_title = lines[0]
+
+    # Remove:
+    #
+    # - job post
+    # – job post
+    # — job post
+
+    job_title = re.sub(
+        r"\s*[-–—]\s*job\s+post\s*$",
+        "",
+        job_title,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # =====================================================
+    # COMPANY
+    # =====================================================
+
+    company_name = lines[1]
+
+    # =====================================================
+    # LOCATION
+    # =====================================================
+
+    location_raw = ""
+
+    if len(lines) >= 3:
+        location_raw = lines[2]
+
+    # =====================================================
+    # REMOTE TYPE
+    # =====================================================
+
+    remote_type = ""
+
+    lower_location = (
+        location_raw.lower()
+    )
+
+    if "remote" in lower_location:
+
+        remote_type = "Remote"
+
+    elif "hybrid" in lower_location:
+
+        remote_type = "Hybrid"
+
+    elif (
+        "on-site" in lower_location
+        or "onsite" in lower_location
+    ):
+
+        remote_type = "Onsite"
+
+    # =====================================================
+    # REMOVE WORK MODE FROM LOCATION
+    # =====================================================
+
+    location = re.sub(
+        r"\s*[•·]\s*"
+        r"(?:Remote|Hybrid|On-site|Onsite)"
+        r"\s*$",
+        "",
+        location_raw,
+        flags=re.IGNORECASE,
+    )
+
+    location = re.sub(
+        r"^Remote\s+in\s+",
+        "",
+        location,
+        flags=re.IGNORECASE,
+    )
+
+    location = re.sub(
+        r"^Hybrid\s+work\s+in\s+",
+        "",
+        location,
+        flags=re.IGNORECASE,
+    )
+
+    location = location.strip()
+
+    return (
+        job_title,
+        company_name,
+        location,
+        remote_type,
+    )
+
+def parse_indeed_location(location):
+
+    if not location:
+        return "", "", ""
+
+    parts = [
+        part.strip()
+        for part in location.split(",")
+        if part.strip()
+    ]
+
+    city = ""
+    state = ""
+    country = ""
+
+    if len(parts) >= 1:
+        city = parts[0]
+
+    if len(parts) >= 2:
+        state = parts[1]
+
+    if len(parts) >= 3:
+        country = parts[-1]
+
+    return (
+        city,
+        state,
+        country,
+    )
 
 # ============================================================
 # MAIN EXTRACTION
@@ -2171,6 +2687,155 @@ def extract_job_data(
     #
     # etc.
     # =====================================================
+    # =====================================================
+    # INDEED EXTRACTION
+    # =====================================================
+
+    elif source_platform == "Indeed":
+
+        # -------------------------------------------------
+        # Keep only selected Indeed job.
+        # -------------------------------------------------
+
+        main_text = (
+            isolate_indeed_job_text(
+                text
+            )
+        )
+
+        # -------------------------------------------------
+        # HEADER
+        # -------------------------------------------------
+
+        (
+            job_title,
+            company_name,
+            location,
+            header_remote_type,
+        ) = extract_indeed_header(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # DESCRIPTION
+        # -------------------------------------------------
+
+        job_description = (
+            extract_indeed_job_description(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # EXPERIENCE
+        # -------------------------------------------------
+
+        (
+            experience_required,
+            experience_min,
+            experience_max,
+        ) = extract_indeed_experience(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # SALARY
+        # -------------------------------------------------
+
+        (
+            salary_min,
+            salary_max,
+            salary_currency,
+        ) = extract_indeed_salary(
+            main_text
+        )
+
+        # -------------------------------------------------
+        # LOCATION
+        # -------------------------------------------------
+
+        (
+            city,
+            state,
+            country,
+        ) = parse_indeed_location(
+            location
+        )
+
+        # -------------------------------------------------
+        # SKILLS
+        # -------------------------------------------------
+
+        skills = extract_skills(
+            job_description
+        )
+
+        # -------------------------------------------------
+        # REMOTE TYPE
+        # -------------------------------------------------
+
+        remote_type = (
+            detect_indeed_remote_type(
+                main_text,
+                header_remote_type,
+            )
+        )
+
+        # -------------------------------------------------
+        # EMPLOYMENT TYPE
+        # -------------------------------------------------
+
+        employment_type = (
+            extract_indeed_employment_type(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # CATEGORY
+        # -------------------------------------------------
+
+        category = (
+            detect_job_category(
+                job_title,
+                job_description,
+            )
+        )
+
+        # -------------------------------------------------
+        # POSTED DATE
+        #
+        # Your provided selected Indeed job block does NOT
+        # contain a posted date.
+        #
+        # Therefore leave blank rather than guessing.
+        # -------------------------------------------------
+
+        posted_date = ""
+
+        # -------------------------------------------------
+        # COMPANY WEBSITE
+        # -------------------------------------------------
+
+        company_website = (
+            extract_company_website(
+                main_text
+            )
+        )
+
+        # -------------------------------------------------
+        # APPLY URL
+        #
+        # Copied text does not contain the actual apply URL.
+        # -------------------------------------------------
+
+        apply_url = get_label_value(
+            main_text,
+            [
+                "Apply URL",
+                "Application URL",
+            ],
+        )
 
     else:
 
