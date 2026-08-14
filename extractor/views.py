@@ -2038,30 +2038,37 @@ def isolate_indeed_job_text(text):
 
 def extract_indeed_header(text):
     """
-    Example:
+    Extract Indeed selected-job header.
 
-    Full stack Web Developer Minimum 3+ years of Experience
-    on Bricks & Elementor UI/UX (WFH)- job post
+    Supports:
 
-    COMTREK
-
+    Java Developer - AI Trainer- job post
+    DataAnnotation
+    4.1
+    4.1 out of 5 stars
     Mumbai, Maharashtra•Remote
+    ₹50 - ₹100 an hour
 
-    ₹30,000 - ₹50,000 a month
+    AND:
 
+    Jr. Software Developer- job post
+    Irecord Infotech Solutions Pvt Ltd
+    Borivali, Mumbai, Maharashtra
+    ₹22,000 - ₹50,000 a month
 
     Returns:
 
-    job_title
-    company_name
-    location
-    remote_type
+        job_title
+        company_name
+        location
+        remote_type
     """
 
     lines = [
         line.strip()
         for line in text.split("\n")
         if line.strip()
+        and line.strip() != "&nbsp;"
     ]
 
     if len(lines) < 2:
@@ -2087,19 +2094,119 @@ def extract_indeed_header(text):
     ).strip()
 
     # =====================================================
-    # COMPANY
+    # COMPANY NAME
     # =====================================================
 
-    company_name = lines[1]
+    company_name = lines[1].strip()
 
     # =====================================================
-    # LOCATION
+    # FIND LOCATION
+    # =====================================================
+    #
+    # IMPORTANT:
+    #
+    # Do NOT assume lines[2] is location.
+    #
+    # Indeed may have:
+    #
+    # DataAnnotation
+    # 4.1
+    # 4.1 out of 5 stars
+    # Mumbai, Maharashtra•Remote
+    #
+    # So scan lines after company until Job details.
     # =====================================================
 
     location_raw = ""
 
-    if len(lines) >= 3:
-        location_raw = lines[2]
+    for line in lines[2:20]:
+
+        lower = line.lower()
+
+        # Stop once header has ended.
+        if lower == "job details":
+            break
+
+        # -----------------------------------------------
+        # Ignore standalone rating:
+        #
+        # 4.1
+        # 3.8
+        # -----------------------------------------------
+
+        if re.fullmatch(
+            r"\d+(?:\.\d+)?",
+            line,
+        ):
+            continue
+
+        # -----------------------------------------------
+        # Ignore rating text:
+        #
+        # 4.1 out of 5 stars
+        # -----------------------------------------------
+
+        if re.fullmatch(
+            r"\d+(?:\.\d+)?"
+            r"\s+out\s+of\s+"
+            r"\d+(?:\.\d+)?"
+            r"\s+stars?",
+            line,
+            flags=re.IGNORECASE,
+        ):
+            continue
+
+        # -----------------------------------------------
+        # Ignore salary lines
+        #
+        # ₹50 - ₹100 an hour
+        # ₹22,000 - ₹50,000 a month
+        # -----------------------------------------------
+
+        if re.search(
+            r"(₹|Rs\.?)\s*[\d,]+",
+            line,
+            flags=re.IGNORECASE,
+        ):
+            continue
+
+        # -----------------------------------------------
+        # Ignore obvious UI text
+        # -----------------------------------------------
+
+        ignored_lines = {
+            "easily apply",
+            "job details",
+            "pay",
+            "job type",
+            "benefits",
+        }
+
+        if lower in ignored_lines:
+            continue
+
+        # -----------------------------------------------
+        # LOCATION CANDIDATE
+        #
+        # Typical Indeed forms:
+        #
+        # Mumbai, Maharashtra
+        # Borivali, Mumbai, Maharashtra
+        # Mumbai, Maharashtra•Remote
+        # Remote in Mumbai, Maharashtra
+        # Hybrid work in Thane, Maharashtra
+        # -----------------------------------------------
+
+        if (
+            "," in line
+            or "•remote" in lower
+            or "•hybrid" in lower
+            or "•on-site" in lower
+            or lower.startswith("remote in ")
+            or lower.startswith("hybrid work in ")
+        ):
+            location_raw = line
+            break
 
     # =====================================================
     # REMOTE TYPE
@@ -2107,37 +2214,46 @@ def extract_indeed_header(text):
 
     remote_type = ""
 
-    lower_location = (
-        location_raw.lower()
-    )
+    lower_location = location_raw.lower()
 
-    if "remote" in lower_location:
-
+    if (
+        "remote" in lower_location
+    ):
         remote_type = "Remote"
 
-    elif "hybrid" in lower_location:
-
+    elif (
+        "hybrid" in lower_location
+    ):
         remote_type = "Hybrid"
 
     elif (
         "on-site" in lower_location
         or "onsite" in lower_location
     ):
-
         remote_type = "Onsite"
 
     # =====================================================
-    # REMOVE WORK MODE FROM LOCATION
+    # CLEAN LOCATION
     # =====================================================
+
+    location = location_raw
+
+    # Mumbai, Maharashtra•Remote
+    # ->
+    # Mumbai, Maharashtra
 
     location = re.sub(
         r"\s*[•·]\s*"
         r"(?:Remote|Hybrid|On-site|Onsite)"
         r"\s*$",
         "",
-        location_raw,
+        location,
         flags=re.IGNORECASE,
     )
+
+    # Remote in Mumbai, Maharashtra
+    # ->
+    # Mumbai, Maharashtra
 
     location = re.sub(
         r"^Remote\s+in\s+",
@@ -2145,6 +2261,10 @@ def extract_indeed_header(text):
         location,
         flags=re.IGNORECASE,
     )
+
+    # Hybrid work in Thane, Maharashtra
+    # ->
+    # Thane, Maharashtra
 
     location = re.sub(
         r"^Hybrid\s+work\s+in\s+",
@@ -2163,28 +2283,150 @@ def extract_indeed_header(text):
     )
 
 def parse_indeed_location(location):
+    """
+    Parse Indeed location.
+
+    Rules:
+
+    Mumbai, Maharashtra
+        city    = Mumbai
+        state   = Maharashtra
+        country = ""
+
+    Borivali, Mumbai, Maharashtra
+        city    = Borivali, Mumbai
+        state   = Maharashtra
+        country = ""
+
+    Borivali, Mumbai, Maharashtra, India
+        city    = Borivali, Mumbai
+        state   = Maharashtra
+        country = India
+
+    Bhopal, Madhya Pradesh, India
+        city    = Bhopal
+        state   = Madhya Pradesh
+        country = India
+    """
 
     if not location:
         return "", "", ""
 
+    # =====================================================
+    # CLEAN WORK-MODE INFORMATION
+    # =====================================================
+
+    cleaned_location = re.sub(
+        r"\s*[•·]\s*"
+        r"(Remote|Hybrid|On-site|Onsite)"
+        r"\s*$",
+        "",
+        location,
+        flags=re.IGNORECASE,
+    )
+
+    cleaned_location = re.sub(
+        r"^Remote\s+in\s+",
+        "",
+        cleaned_location,
+        flags=re.IGNORECASE,
+    )
+
+    cleaned_location = re.sub(
+        r"^Hybrid\s+work\s+in\s+",
+        "",
+        cleaned_location,
+        flags=re.IGNORECASE,
+    )
+
+    cleaned_location = (
+        cleaned_location.strip()
+    )
+
     parts = [
         part.strip()
-        for part in location.split(",")
+        for part in cleaned_location.split(",")
         if part.strip()
     ]
+
+    if not parts:
+        return "", "", ""
 
     city = ""
     state = ""
     country = ""
 
-    if len(parts) >= 1:
-        city = parts[0]
+    # =====================================================
+    # CHECK WHETHER COUNTRY IS EXPLICITLY PRESENT
+    # =====================================================
 
-    if len(parts) >= 2:
-        state = parts[1]
+    known_countries = {
+        "india",
+        "united states",
+        "usa",
+        "u.s.",
+        "u.s.a.",
+        "united kingdom",
+        "uk",
+        "canada",
+        "australia",
+        "germany",
+        "france",
+        "singapore",
+        "uae",
+        "united arab emirates",
+    }
 
-    if len(parts) >= 3:
+    has_country = (
+        len(parts) >= 3
+        and parts[-1].lower()
+        in known_countries
+    )
+
+    # =====================================================
+    # COUNTRY PRESENT
+    #
+    # Borivali, Mumbai, Maharashtra, India
+    #
+    # Last     -> country
+    # Previous -> state
+    # Everything before -> city
+    # =====================================================
+
+    if has_country:
+
         country = parts[-1]
+
+        if len(parts) >= 2:
+            state = parts[-2]
+
+        if len(parts) >= 3:
+            city = ", ".join(
+                parts[:-2]
+            )
+
+    # =====================================================
+    # COUNTRY NOT PRESENT
+    #
+    # Borivali, Mumbai, Maharashtra
+    #
+    # Last -> state
+    # Everything before -> city
+    # =====================================================
+
+    else:
+
+        if len(parts) == 1:
+
+            city = parts[0]
+
+        elif len(parts) >= 2:
+
+            state = parts[-1]
+
+            city = ", ".join(
+                parts[:-1]
+            )
 
     return (
         city,
