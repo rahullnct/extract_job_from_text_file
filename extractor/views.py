@@ -1300,13 +1300,34 @@ def detect_remote_type(text):
 # ============================================================
 
 def extract_indeed_employment_type(text):
+    """
+    Extract one or multiple Indeed employment types.
 
-    lines = [
-        line.strip()
-        for line in text.split("\n")
-        if line.strip()
-        and line.strip() != "&nbsp;"
-    ]
+    Examples:
+
+    Job type
+
+    Full-time
+
+    Location
+
+    -> Full-time
+
+
+    Job type
+
+    Permanent
+
+    Full-time
+
+    Location
+
+    -> Permanent, Full-time
+    """
+
+    # =====================================================
+    # ALLOWED EMPLOYMENT TYPES
+    # =====================================================
 
     allowed_types = {
         "full-time": "Full-time",
@@ -1322,60 +1343,181 @@ def extract_indeed_employment_type(text):
         "temporary": "Temporary",
 
         "freelance": "Freelance",
+
+        "permanent": "Permanent",
     }
 
     # =====================================================
-    # First check:
-    #
-    # Job type
-    # Full-time
+    # CLEAN LINES
     # =====================================================
+
+    lines = []
+
+    for line in text.split("\n"):
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        if line.lower() in {
+            "&nbsp;",
+            "nbsp;",
+        }:
+            continue
+
+        lines.append(line)
+
+    # =====================================================
+    # FIND "JOB TYPE"
+    # =====================================================
+
+    job_type_index = None
 
     for index, line in enumerate(lines):
 
         if line.lower() == "job type":
 
-            if index + 1 < len(lines):
+            job_type_index = index
+            break
 
-                value = (
-                    lines[index + 1]
-                    .lower()
-                )
+    if job_type_index is None:
 
-                if value in allowed_types:
+        # -------------------------------------------------
+        # Fallback:
+        #
+        # Job Type: Full-time
+        # -------------------------------------------------
 
-                    return allowed_types[
-                        value
-                    ]
-
-    # =====================================================
-    # Second check:
-    #
-    # Job Type: Full-time
-    # =====================================================
-
-    match = re.search(
-        r"Job\s+Type\s*:\s*([^\n]+)",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    if match:
-
-        value = (
-            match.group(1)
-            .strip()
-            .lower()
+        match = re.search(
+            r"Job\s+Type\s*:\s*([^\n]+)",
+            text,
+            flags=re.IGNORECASE,
         )
 
-        if value in allowed_types:
+        if not match:
+            return ""
 
-            return allowed_types[
-                value
-            ]
+        raw_value = (
+            match.group(1)
+            .strip()
+        )
 
-    return ""
+        # May contain:
+        # Permanent, Full-time
 
+        parts = re.split(
+            r"[,|/+]+",
+            raw_value,
+        )
+
+        found_types = []
+
+        for part in parts:
+
+            normalized = (
+                part.strip()
+                .lower()
+            )
+
+            if normalized in allowed_types:
+
+                employment_type = (
+                    allowed_types[
+                        normalized
+                    ]
+                )
+
+                if employment_type not in found_types:
+
+                    found_types.append(
+                        employment_type
+                    )
+
+        return ", ".join(
+            found_types
+        )
+
+    # =====================================================
+    # COLLECT TYPES AFTER "JOB TYPE"
+    # UNTIL LOCATION
+    # =====================================================
+
+    found_types = []
+
+    for line in lines[
+        job_type_index + 1:
+    ]:
+
+        lower = line.lower()
+
+        # -------------------------------------------------
+        # Stop when next Indeed section begins.
+        # -------------------------------------------------
+
+        if lower in {
+            "location",
+            "benefits",
+            "full job description",
+            "qualifications",
+            "education",
+        }:
+            break
+
+        # -------------------------------------------------
+        # Direct match:
+        #
+        # Permanent
+        # Full-time
+        # -------------------------------------------------
+
+        if lower in allowed_types:
+
+            employment_type = (
+                allowed_types[
+                    lower
+                ]
+            )
+
+            if employment_type not in found_types:
+
+                found_types.append(
+                    employment_type
+                )
+
+            continue
+
+        # -------------------------------------------------
+        # Handle text like:
+        #
+        # Full-time +1
+        #
+        # Permanent +1
+        # -------------------------------------------------
+
+        cleaned = re.sub(
+            r"\s*\+\s*\d+\s*$",
+            "",
+            lower,
+        ).strip()
+
+        if cleaned in allowed_types:
+
+            employment_type = (
+                allowed_types[
+                    cleaned
+                ]
+            )
+
+            if employment_type not in found_types:
+
+                found_types.append(
+                    employment_type
+                )
+
+    return ", ".join(
+        found_types
+    )
 
 def extract_employment_type(text):
 
