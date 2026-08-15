@@ -7,6 +7,7 @@ import calendar
 import re
 
 from datetime import timedelta
+from bs4 import BeautifulSoup
 
 from django.utils import timezone
 
@@ -702,40 +703,6 @@ def extract_company_name(text):
 # JOB DESCRIPTION
 # ============================================================
 
-def extract_indeed_job_description(text):
-    """
-    Extract everything after:
-
-        Full job description
-    """
-
-    match = re.search(
-        r"Full\s+job\s+description",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    if not match:
-        return ""
-
-    description = text[
-        match.end():
-    ]
-
-    # Clean HTML-like copied artifacts.
-    description = description.replace(
-        "&nbsp;",
-        " ",
-    )
-
-    description = re.sub(
-        r"\n{3,}",
-        "\n\n",
-        description,
-    )
-
-    return description.strip()
-
 
 def extract_job_description(text):
 
@@ -763,97 +730,6 @@ def extract_job_description(text):
 # EXPERIENCE
 # ============================================================
 
-def extract_indeed_experience(text):
-
-    # =====================================================
-    # RANGE
-    #
-    # 2 to 5 Years
-    # 2 - 5 years
-    # =====================================================
-
-    range_patterns = [
-        (
-            r"(\d+(?:\.\d+)?)"
-            r"\s*to\s*"
-            r"(\d+(?:\.\d+)?)"
-            r"\s*(?:years?|yrs?)"
-        ),
-
-        (
-            r"(\d+(?:\.\d+)?)"
-            r"\s*-\s*"
-            r"(\d+(?:\.\d+)?)"
-            r"\s*(?:years?|yrs?)"
-        ),
-    ]
-
-    for pattern in range_patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        if match:
-
-            minimum = float(
-                match.group(1)
-            )
-
-            maximum = float(
-                match.group(2)
-            )
-
-            if minimum.is_integer():
-                minimum = int(minimum)
-
-            if maximum.is_integer():
-                maximum = int(maximum)
-
-            return (
-                f"{minimum} to {maximum} Years",
-                minimum,
-                maximum,
-            )
-
-    # =====================================================
-    # MINIMUM / PLUS EXPERIENCE
-    #
-    # 3+ years experience
-    # Minimum 3+ years
-    # minimum 5 years
-    # =====================================================
-
-    plus_match = re.search(
-        r"(?:minimum\s+)?"
-        r"(\d+(?:\.\d+)?)"
-        r"\s*\+\s*"
-        r"(?:years?|yrs?)",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    if plus_match:
-
-        minimum = float(
-            plus_match.group(1)
-        )
-
-        if minimum.is_integer():
-            minimum = int(minimum)
-
-        return (
-            f"{minimum}+ Years",
-            minimum,
-            "",
-        )
-
-    # Generic fallback
-    return extract_experience(
-        text
-    )
 
 def extract_experience(text):
 
@@ -1067,66 +943,6 @@ def extract_linkedin_job_category(
 # SALARY
 # ============================================================
 
-def extract_indeed_salary(text):
-    """
-    Supported example:
-
-        ₹30,000 - ₹50,000 a month
-
-    Because our schema has no salary_period,
-    monthly salaries are normalized to annual INR.
-    """
-
-    pattern = (
-        r"(?:₹|Rs\.?)\s*"
-        r"([\d,]+(?:\.\d+)?)"
-        r"\s*(?:-|–|—|to)\s*"
-        r"(?:₹|Rs\.?)?\s*"
-        r"([\d,]+(?:\.\d+)?)"
-        r"\s*"
-        r"(?:a|per)?\s*"
-        r"(month|year|annum)"
-    )
-
-    match = re.search(
-        pattern,
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    if not match:
-        return "", "", ""
-
-    minimum = float(
-        match.group(1).replace(
-            ",",
-            "",
-        )
-    )
-
-    maximum = float(
-        match.group(2).replace(
-            ",",
-            "",
-        )
-    )
-
-    period = (
-        match.group(3)
-        .lower()
-    )
-
-    # Normalize monthly salary to annual.
-    if period == "month":
-
-        minimum *= 12
-        maximum *= 12
-
-    return (
-        int(minimum),
-        int(maximum),
-        "INR",
-    )
 
 def extract_salary(text):
 
@@ -1235,37 +1051,6 @@ def extract_locations(text):
 # REMOTE TYPE
 # ============================================================
 
-def detect_indeed_remote_type(
-    text,
-    header_remote_type="",
-):
-
-    if header_remote_type:
-        return header_remote_type
-
-    lower = text.lower()
-
-    if (
-        "work location: remote" in lower
-        or "work from home" in lower
-        or "remote in " in lower
-    ):
-        return "Remote"
-
-    if (
-        "hybrid work in " in lower
-        or "work location: hybrid" in lower
-    ):
-        return "Hybrid"
-
-    if (
-        "work location: in person" in lower
-        or "on-site" in lower
-        or "onsite" in lower
-    ):
-        return "Onsite"
-
-    return ""
 
 def detect_remote_type(text):
 
@@ -1299,225 +1084,6 @@ def detect_remote_type(text):
 # EMPLOYMENT TYPE
 # ============================================================
 
-def extract_indeed_employment_type(text):
-    """
-    Extract one or multiple Indeed employment types.
-
-    Examples:
-
-    Job type
-
-    Full-time
-
-    Location
-
-    -> Full-time
-
-
-    Job type
-
-    Permanent
-
-    Full-time
-
-    Location
-
-    -> Permanent, Full-time
-    """
-
-    # =====================================================
-    # ALLOWED EMPLOYMENT TYPES
-    # =====================================================
-
-    allowed_types = {
-        "full-time": "Full-time",
-        "full time": "Full-time",
-
-        "part-time": "Part-time",
-        "part time": "Part-time",
-
-        "internship": "Internship",
-
-        "contract": "Contract",
-
-        "temporary": "Temporary",
-
-        "freelance": "Freelance",
-
-        "permanent": "Permanent",
-    }
-
-    # =====================================================
-    # CLEAN LINES
-    # =====================================================
-
-    lines = []
-
-    for line in text.split("\n"):
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        if line.lower() in {
-            "&nbsp;",
-            "nbsp;",
-        }:
-            continue
-
-        lines.append(line)
-
-    # =====================================================
-    # FIND "JOB TYPE"
-    # =====================================================
-
-    job_type_index = None
-
-    for index, line in enumerate(lines):
-
-        if line.lower() == "job type":
-
-            job_type_index = index
-            break
-
-    if job_type_index is None:
-
-        # -------------------------------------------------
-        # Fallback:
-        #
-        # Job Type: Full-time
-        # -------------------------------------------------
-
-        match = re.search(
-            r"Job\s+Type\s*:\s*([^\n]+)",
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        if not match:
-            return ""
-
-        raw_value = (
-            match.group(1)
-            .strip()
-        )
-
-        # May contain:
-        # Permanent, Full-time
-
-        parts = re.split(
-            r"[,|/+]+",
-            raw_value,
-        )
-
-        found_types = []
-
-        for part in parts:
-
-            normalized = (
-                part.strip()
-                .lower()
-            )
-
-            if normalized in allowed_types:
-
-                employment_type = (
-                    allowed_types[
-                        normalized
-                    ]
-                )
-
-                if employment_type not in found_types:
-
-                    found_types.append(
-                        employment_type
-                    )
-
-        return ", ".join(
-            found_types
-        )
-
-    # =====================================================
-    # COLLECT TYPES AFTER "JOB TYPE"
-    # UNTIL LOCATION
-    # =====================================================
-
-    found_types = []
-
-    for line in lines[
-        job_type_index + 1:
-    ]:
-
-        lower = line.lower()
-
-        # -------------------------------------------------
-        # Stop when next Indeed section begins.
-        # -------------------------------------------------
-
-        if lower in {
-            "location",
-            "benefits",
-            "full job description",
-            "qualifications",
-            "education",
-        }:
-            break
-
-        # -------------------------------------------------
-        # Direct match:
-        #
-        # Permanent
-        # Full-time
-        # -------------------------------------------------
-
-        if lower in allowed_types:
-
-            employment_type = (
-                allowed_types[
-                    lower
-                ]
-            )
-
-            if employment_type not in found_types:
-
-                found_types.append(
-                    employment_type
-                )
-
-            continue
-
-        # -------------------------------------------------
-        # Handle text like:
-        #
-        # Full-time +1
-        #
-        # Permanent +1
-        # -------------------------------------------------
-
-        cleaned = re.sub(
-            r"\s*\+\s*\d+\s*$",
-            "",
-            lower,
-        ).strip()
-
-        if cleaned in allowed_types:
-
-            employment_type = (
-                allowed_types[
-                    cleaned
-                ]
-            )
-
-            if employment_type not in found_types:
-
-                found_types.append(
-                    employment_type
-                )
-
-    return ", ".join(
-        found_types
-    )
 
 def extract_employment_type(text):
 
@@ -2127,259 +1693,142 @@ def generate_internal_job_id(
     return digest[:32]
 
 
-def isolate_indeed_job_text(text):
+# ============================================================
+# VIEW SOURCE UNWRAPPER
+# ============================================================
+
+def unwrap_view_source_file(raw_text):
+    """
+    Convert a Chrome-saved View Source page back into
+    the original page HTML.
+
+    Also supports a TXT file that already contains
+    normal raw HTML.
+    """
+
+    soup = BeautifulSoup(
+        raw_text,
+        "html.parser",
+    )
+
+    source_lines = soup.select(
+        "td.line-content"
+    )
+
+    # If Chrome View Source wrapper exists,
+    # rebuild the original source line-by-line.
+    if source_lines:
+
+        original_html = "\n".join(
+            line.get_text(
+                "",
+                strip=False,
+            )
+            for line in source_lines
+        )
+
+        return original_html
+
+    # Otherwise the uploaded TXT already
+    # contains normal HTML source.
+    return raw_text
+
+# ============================================================
+# ISOLATE INDEED SELECTED JOB
+# ============================================================
+
+def isolate_indeed_job_section(
+    source_html,
+):
     """
     Keep only the currently selected Indeed job.
 
-    Start:
-        Return to Search ResultJob Post Details
+    Expected starting element:
 
-    End:
-        Return to Search Result
+    <section id="job-full-details">
+        ...
+    </section>
     """
 
-    # Handles:
-    #
-    # Return to Search ResultJob Post Details
-    #
-    # OR:
-    #
-    # Return to Search Result Job Post Details
-
-    start_match = re.search(
-        r"Return\s+to\s+Search\s+Result\s*"
-        r"Job\s+Post\s+Details",
-        text,
-        flags=re.IGNORECASE,
+    soup = BeautifulSoup(
+        source_html,
+        "html.parser",
     )
 
-    if not start_match:
-        return text.strip()
-
-    job_text = text[
-        start_match.end():
-    ]
-
-    # Find the NEXT Return to Search Result,
-    # which appears after the full selected job.
-
-    end_match = re.search(
-        r"(?:^|\n)\s*"
-        r"Return\s+to\s+Search\s+Result\b",
-        job_text,
-        flags=re.IGNORECASE,
+    job_section = soup.find(
+        "section",
+        id="job-full-details",
     )
 
-    if end_match:
+    if not job_section:
+        return ""
 
-        job_text = job_text[
-            :end_match.start()
-        ]
+    return str(
+        job_section
+    )
 
-    return job_text.strip()
+# ============================================================
+# INDEED SOURCE LOCATION
+# ============================================================
 
-def extract_indeed_header(text):
+def parse_indeed_source_location(
+    location,
+    country_code="",
+):
     """
-    Extract Indeed selected-job header.
+    Examples:
 
-    Supports:
+    Mumbai, Maharashtra
+        city    = Mumbai
+        state   = Maharashtra
 
-    Java Developer - AI Trainer- job post
-    DataAnnotation
-    4.1
-    4.1 out of 5 stars
-    Mumbai, Maharashtra•Remote
-    ₹50 - ₹100 an hour
-
-    AND:
-
-    Jr. Software Developer- job post
-    Irecord Infotech Solutions Pvt Ltd
     Borivali, Mumbai, Maharashtra
-    ₹22,000 - ₹50,000 a month
+        city    = Borivali, Mumbai
+        state   = Maharashtra
 
-    Returns:
+    Borivali, Mumbai, Maharashtra, India
+        city    = Borivali, Mumbai
+        state   = Maharashtra
+        country = India
 
-        job_title
-        company_name
-        location
-        remote_type
+    Remote
+        city    = ""
+        state   = ""
     """
 
-    lines = [
-        line.strip()
-        for line in text.split("\n")
-        if line.strip()
-        and line.strip() != "&nbsp;"
-    ]
+    country_map = {
+        "IN": "India",
+        "US": "United States",
+        "GB": "United Kingdom",
+        "UK": "United Kingdom",
+        "CA": "Canada",
+        "AU": "Australia",
+        "AE": "United Arab Emirates",
+        "SG": "Singapore",
+    }
 
-    if len(lines) < 2:
-        return "", "", "", ""
+    country = ""
 
-    # =====================================================
-    # JOB TITLE
-    # =====================================================
+    if country_code:
 
-    job_title = lines[0]
+        country = country_map.get(
+            country_code.upper(),
+            country_code,
+        )
 
-    # Remove:
+    if not location:
+
+        return "", "", country
+
+    location = location.strip()
+
+    # Pure remote job has no physical city/state.
+    if location.lower() == "remote":
+
+        return "", "", country
+
+    # Remove work-mode suffix.
     #
-    # - job post
-    # – job post
-    # — job post
-
-    job_title = re.sub(
-        r"\s*[-–—]\s*job\s+post\s*$",
-        "",
-        job_title,
-        flags=re.IGNORECASE,
-    ).strip()
-
-    # =====================================================
-    # COMPANY NAME
-    # =====================================================
-
-    company_name = lines[1].strip()
-
-    # =====================================================
-    # FIND LOCATION
-    # =====================================================
-    #
-    # IMPORTANT:
-    #
-    # Do NOT assume lines[2] is location.
-    #
-    # Indeed may have:
-    #
-    # DataAnnotation
-    # 4.1
-    # 4.1 out of 5 stars
-    # Mumbai, Maharashtra•Remote
-    #
-    # So scan lines after company until Job details.
-    # =====================================================
-
-    location_raw = ""
-
-    for line in lines[2:20]:
-
-        lower = line.lower()
-
-        # Stop once header has ended.
-        if lower == "job details":
-            break
-
-        # -----------------------------------------------
-        # Ignore standalone rating:
-        #
-        # 4.1
-        # 3.8
-        # -----------------------------------------------
-
-        if re.fullmatch(
-            r"\d+(?:\.\d+)?",
-            line,
-        ):
-            continue
-
-        # -----------------------------------------------
-        # Ignore rating text:
-        #
-        # 4.1 out of 5 stars
-        # -----------------------------------------------
-
-        if re.fullmatch(
-            r"\d+(?:\.\d+)?"
-            r"\s+out\s+of\s+"
-            r"\d+(?:\.\d+)?"
-            r"\s+stars?",
-            line,
-            flags=re.IGNORECASE,
-        ):
-            continue
-
-        # -----------------------------------------------
-        # Ignore salary lines
-        #
-        # ₹50 - ₹100 an hour
-        # ₹22,000 - ₹50,000 a month
-        # -----------------------------------------------
-
-        if re.search(
-            r"(₹|Rs\.?)\s*[\d,]+",
-            line,
-            flags=re.IGNORECASE,
-        ):
-            continue
-
-        # -----------------------------------------------
-        # Ignore obvious UI text
-        # -----------------------------------------------
-
-        ignored_lines = {
-            "easily apply",
-            "job details",
-            "pay",
-            "job type",
-            "benefits",
-        }
-
-        if lower in ignored_lines:
-            continue
-
-        # -----------------------------------------------
-        # LOCATION CANDIDATE
-        #
-        # Typical Indeed forms:
-        #
-        # Mumbai, Maharashtra
-        # Borivali, Mumbai, Maharashtra
-        # Mumbai, Maharashtra•Remote
-        # Remote in Mumbai, Maharashtra
-        # Hybrid work in Thane, Maharashtra
-        # -----------------------------------------------
-
-        if (
-            "," in line
-            or "•remote" in lower
-            or "•hybrid" in lower
-            or "•on-site" in lower
-            or lower.startswith("remote in ")
-            or lower.startswith("hybrid work in ")
-        ):
-            location_raw = line
-            break
-
-    # =====================================================
-    # REMOTE TYPE
-    # =====================================================
-
-    remote_type = ""
-
-    lower_location = location_raw.lower()
-
-    if (
-        "remote" in lower_location
-    ):
-        remote_type = "Remote"
-
-    elif (
-        "hybrid" in lower_location
-    ):
-        remote_type = "Hybrid"
-
-    elif (
-        "on-site" in lower_location
-        or "onsite" in lower_location
-    ):
-        remote_type = "Onsite"
-
-    # =====================================================
-    # CLEAN LOCATION
-    # =====================================================
-
-    location = location_raw
-
     # Mumbai, Maharashtra•Remote
     # ->
     # Mumbai, Maharashtra
@@ -2404,9 +1853,9 @@ def extract_indeed_header(text):
         flags=re.IGNORECASE,
     )
 
-    # Hybrid work in Thane, Maharashtra
+    # Hybrid work in Mumbai, Maharashtra
     # ->
-    # Thane, Maharashtra
+    # Mumbai, Maharashtra
 
     location = re.sub(
         r"^Hybrid\s+work\s+in\s+",
@@ -2417,158 +1866,68 @@ def extract_indeed_header(text):
 
     location = location.strip()
 
-    return (
-        job_title,
-        company_name,
-        location,
-        remote_type,
-    )
-
-def parse_indeed_location(location):
-    """
-    Parse Indeed location.
-
-    Rules:
-
-    Mumbai, Maharashtra
-        city    = Mumbai
-        state   = Maharashtra
-        country = ""
-
-    Borivali, Mumbai, Maharashtra
-        city    = Borivali, Mumbai
-        state   = Maharashtra
-        country = ""
-
-    Borivali, Mumbai, Maharashtra, India
-        city    = Borivali, Mumbai
-        state   = Maharashtra
-        country = India
-
-    Bhopal, Madhya Pradesh, India
-        city    = Bhopal
-        state   = Madhya Pradesh
-        country = India
-    """
-
-    if not location:
-        return "", "", ""
-
-    # =====================================================
-    # CLEAN WORK-MODE INFORMATION
-    # =====================================================
-
-    cleaned_location = re.sub(
-        r"\s*[•·]\s*"
-        r"(Remote|Hybrid|On-site|Onsite)"
-        r"\s*$",
-        "",
-        location,
-        flags=re.IGNORECASE,
-    )
-
-    cleaned_location = re.sub(
-        r"^Remote\s+in\s+",
-        "",
-        cleaned_location,
-        flags=re.IGNORECASE,
-    )
-
-    cleaned_location = re.sub(
-        r"^Hybrid\s+work\s+in\s+",
-        "",
-        cleaned_location,
-        flags=re.IGNORECASE,
-    )
-
-    cleaned_location = (
-        cleaned_location.strip()
-    )
-
     parts = [
         part.strip()
-        for part in cleaned_location.split(",")
+        for part in location.split(",")
         if part.strip()
     ]
 
     if not parts:
-        return "", "", ""
+        return "", "", country
 
-    city = ""
-    state = ""
-    country = ""
+    # -----------------------------------------------
+    # Country explicitly present in location.
+    # -----------------------------------------------
 
-    # =====================================================
-    # CHECK WHETHER COUNTRY IS EXPLICITLY PRESENT
-    # =====================================================
-
-    known_countries = {
+    known_country_names = {
         "india",
         "united states",
-        "usa",
-        "u.s.",
-        "u.s.a.",
         "united kingdom",
-        "uk",
         "canada",
         "australia",
-        "germany",
-        "france",
         "singapore",
-        "uae",
         "united arab emirates",
     }
 
-    has_country = (
+    if (
         len(parts) >= 3
         and parts[-1].lower()
-        in known_countries
-    )
-
-    # =====================================================
-    # COUNTRY PRESENT
-    #
-    # Borivali, Mumbai, Maharashtra, India
-    #
-    # Last     -> country
-    # Previous -> state
-    # Everything before -> city
-    # =====================================================
-
-    if has_country:
+        in known_country_names
+    ):
 
         country = parts[-1]
+        state = parts[-2]
 
-        if len(parts) >= 2:
-            state = parts[-2]
+        city = ", ".join(
+            parts[:-2]
+        )
 
-        if len(parts) >= 3:
-            city = ", ".join(
-                parts[:-2]
-            )
+        return (
+            city,
+            state,
+            country,
+        )
 
-    # =====================================================
-    # COUNTRY NOT PRESENT
+    # -----------------------------------------------
+    # No explicit country.
     #
-    # Borivali, Mumbai, Maharashtra
-    #
-    # Last -> state
-    # Everything before -> city
-    # =====================================================
+    # Last item = state
+    # Everything before = city
+    # -----------------------------------------------
 
-    else:
+    if len(parts) == 1:
 
-        if len(parts) == 1:
+        return (
+            parts[0],
+            "",
+            country,
+        )
 
-            city = parts[0]
+    state = parts[-1]
 
-        elif len(parts) >= 2:
-
-            state = parts[-1]
-
-            city = ", ".join(
-                parts[:-1]
-            )
+    city = ", ".join(
+        parts[:-1]
+    )
 
     return (
         city,
@@ -2577,39 +1936,692 @@ def parse_indeed_location(location):
     )
 
 # ============================================================
+# INDEED SOURCE EMPLOYMENT TYPE
+# ============================================================
+
+def extract_indeed_source_employment_type(
+    job_section_text,
+):
+    """
+    Extract one or multiple employment types.
+
+    Example:
+
+    Job type
+
+    Permanent
+    Full-time
+
+    Location
+
+    -> Permanent, Full-time
+    """
+
+    employment_pattern = re.compile(
+        r"""
+        \b(
+            Full[\s-]?time
+            |
+            Part[\s-]?time
+            |
+            Internship
+            |
+            Contract
+            |
+            Temporary
+            |
+            Freelance
+            |
+            Permanent
+        )\b
+        """,
+        flags=(
+            re.IGNORECASE
+            | re.VERBOSE
+        ),
+    )
+
+    # Try to isolate Job type section first.
+    block_match = re.search(
+        r"""
+        Job\s+type
+        \s*
+        (.*?)
+        (?=
+            Location
+            |
+            Benefits
+            |
+            Full\s+job\s+description
+            |
+            Qualifications
+            |
+            $
+        )
+        """,
+        job_section_text,
+        flags=(
+            re.IGNORECASE
+            | re.DOTALL
+            | re.VERBOSE
+        ),
+    )
+
+    if block_match:
+
+        search_text = (
+            block_match.group(1)
+        )
+
+    else:
+
+        search_text = (
+            job_section_text
+        )
+
+    matches = (
+        employment_pattern.findall(
+            search_text
+        )
+    )
+
+    normalization = {
+        "full time": "Full-time",
+        "part time": "Part-time",
+        "internship": "Internship",
+        "contract": "Contract",
+        "temporary": "Temporary",
+        "freelance": "Freelance",
+        "permanent": "Permanent",
+    }
+
+    found_types = []
+
+    for match in matches:
+
+        normalized_key = (
+            match
+            .lower()
+            .replace(
+                "-",
+                " ",
+            )
+        )
+
+        normalized_key = re.sub(
+            r"\s+",
+            " ",
+            normalized_key,
+        ).strip()
+
+        employment_type = (
+            normalization.get(
+                normalized_key,
+                "",
+            )
+        )
+
+        if (
+            employment_type
+            and employment_type
+            not in found_types
+        ):
+
+            found_types.append(
+                employment_type
+            )
+
+    return ", ".join(
+        found_types
+    )
+
+# ============================================================
+# INDEED SOURCE SALARY
+# ============================================================
+
+def extract_indeed_source_salary(
+    text,
+):
+    """
+    Examples:
+
+    ₹3,00,000 - ₹4,50,000 a year
+
+    ₹30,000 - ₹50,000 a month
+
+    ₹50 - ₹100 an hour
+
+    Monthly salary is converted to annual salary.
+
+    Hourly salary is kept as-is because annual conversion
+    cannot be done safely without knowing working hours.
+    """
+
+    pattern = re.compile(
+        r"""
+        ₹\s*
+        ([\d,]+(?:\.\d+)?)
+        \s*
+        (?:-|–|—|to)
+        \s*
+        ₹?\s*
+        ([\d,]+(?:\.\d+)?)
+        \s*
+        (?:a|per)?
+        \s*
+        (hour|day|week|month|year|annum)
+        """,
+        flags=(
+            re.IGNORECASE
+            | re.VERBOSE
+        ),
+    )
+
+    match = pattern.search(
+        text
+    )
+
+    if not match:
+
+        return "", "", ""
+
+    minimum = float(
+        match.group(1).replace(
+            ",",
+            "",
+        )
+    )
+
+    maximum = float(
+        match.group(2).replace(
+            ",",
+            "",
+        )
+    )
+
+    period = (
+        match.group(3)
+        .lower()
+    )
+
+    # Monthly -> annual.
+    if period == "month":
+
+        minimum *= 12
+        maximum *= 12
+
+    if minimum.is_integer():
+        minimum = int(minimum)
+
+    if maximum.is_integer():
+        maximum = int(maximum)
+
+    return (
+        minimum,
+        maximum,
+        "INR",
+    )
+
+# ============================================================
+# INDEED SOURCE POSTED DATE
+# ============================================================
+
+def extract_indeed_source_posted_date(
+    text,
+):
+
+    match = re.search(
+        r"\b"
+        r"(\d+)"
+        r"(\+)?"
+        r"\s+"
+        r"(minute|minutes|hour|hours|"
+        r"day|days|week|weeks|"
+        r"month|months|year|years)"
+        r"\s+ago"
+        r"\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if not match:
+        return ""
+
+    amount = match.group(1)
+
+    plus_sign = (
+        match.group(2)
+        or ""
+    )
+
+    unit = match.group(3)
+
+    raw_value = (
+        f"{amount}{plus_sign} "
+        f"{unit} ago"
+    )
+
+    # "30+ days ago" is not exact.
+    # Keep raw value rather than creating a false exact date.
+
+    if plus_sign:
+
+        return raw_value
+
+    return convert_relative_posted_date(
+        f"{amount} {unit} ago"
+    )
+
+# ============================================================
+# EXTRACT INDEED JOB FROM HTML SECTION
+# ============================================================
+
+def extract_indeed_job_from_section(
+    job_html,
+):
+    """
+    Extract selected Indeed job from:
+
+    <section id="job-full-details">
+        ...
+    </section>
+    """
+
+    if not job_html:
+
+        return {}
+
+    soup = BeautifulSoup(
+        job_html,
+        "html.parser",
+    )
+
+    # =====================================================
+    # JOB TITLE
+    # =====================================================
+
+    job_title = ""
+
+    title_tag = soup.select_one(
+        '[data-testid="jobsearch-JobInfoHeader-title"]'
+    )
+
+    if not title_tag:
+
+        title_tag = soup.select_one(
+            ".jobsearch-JobInfoHeader-title"
+        )
+
+    if title_tag:
+
+        job_title = (
+            title_tag.get_text(
+                " ",
+                strip=True,
+            )
+        )
+
+        job_title = re.sub(
+            r"\s*[-–—]\s*"
+            r"job\s+post\s*$",
+            "",
+            job_title,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    # =====================================================
+    # COMPANY NAME
+    # =====================================================
+
+    company_name = ""
+
+    company_tag = soup.select_one(
+        '[data-testid="inlineHeader-companyName"]'
+    )
+
+    if company_tag:
+
+        company_name = (
+            company_tag.get_text(
+                " ",
+                strip=True,
+            )
+        )
+
+    # =====================================================
+    # LOCATION
+    # =====================================================
+
+    location = ""
+
+    location_tag = soup.select_one(
+        '[data-testid="inlineHeader-companyLocation"]'
+    )
+
+    if location_tag:
+
+        location = (
+            location_tag.get_text(
+                " ",
+                strip=True,
+            )
+        )
+
+    # =====================================================
+    # JOB DESCRIPTION
+    # =====================================================
+
+    job_description = ""
+
+    description_tag = soup.find(
+        id="jobDescriptionText"
+    )
+
+    if description_tag:
+
+        job_description = (
+            description_tag.get_text(
+                "\n",
+                strip=True,
+            )
+        )
+
+        job_description = re.sub(
+            r"\n{3,}",
+            "\n\n",
+            job_description,
+        ).strip()
+
+    # =====================================================
+    # COMPLETE SELECTED-JOB TEXT
+    # =====================================================
+
+    section_text = soup.get_text(
+        "\n",
+        strip=True,
+    )
+
+    # =====================================================
+    # JOB KEY + COUNTRY
+    # =====================================================
+
+    job_key = ""
+    country_code = ""
+
+    apply_widget = soup.select_one(
+        "[data-indeed-apply-jk]"
+    )
+
+    if apply_widget:
+
+        job_key = (
+            apply_widget.get(
+                "data-indeed-apply-jk",
+                "",
+            )
+            or ""
+        )
+
+        country_code = (
+            apply_widget.get(
+                "data-indeed-apply-jobcountry",
+                "",
+            )
+            or ""
+        )
+
+    # =====================================================
+    # APPLY URL
+    # =====================================================
+
+    apply_url = ""
+
+    if job_key:
+
+        apply_url = (
+            "https://in.indeed.com/"
+            f"viewjob?jk={job_key}"
+        )
+
+    # =====================================================
+    # REMOTE TYPE
+    # =====================================================
+
+    remote_type = ""
+
+    lower_location = (
+        location.lower()
+    )
+
+    lower_section = (
+        section_text.lower()
+    )
+
+    if (
+        "remote" in lower_location
+        or "work location: remote"
+        in lower_section
+    ):
+
+        remote_type = "Remote"
+
+    elif (
+        "hybrid" in lower_location
+        or "hybrid work"
+        in lower_section
+    ):
+
+        remote_type = "Hybrid"
+
+    elif (
+        location
+        and location.lower()
+        != "remote"
+    ):
+
+        remote_type = "Onsite"
+
+    # =====================================================
+    # CLEAN LOCATION
+    # =====================================================
+
+    cleaned_location = re.sub(
+        r"\s*[•·]\s*"
+        r"(?:Remote|Hybrid|On-site|Onsite)"
+        r"\s*$",
+        "",
+        location,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    if location.lower() == "remote":
+
+        cleaned_location = "Remote"
+
+    # =====================================================
+    # CITY / STATE / COUNTRY
+    # =====================================================
+
+    (
+        city,
+        state,
+        country,
+    ) = parse_indeed_source_location(
+        cleaned_location,
+        country_code,
+    )
+
+    # =====================================================
+    # EMPLOYMENT TYPE
+    # =====================================================
+
+    employment_type = (
+        extract_indeed_source_employment_type(
+            section_text
+        )
+    )
+
+    # =====================================================
+    # SALARY
+    # =====================================================
+
+    (
+        salary_min,
+        salary_max,
+        salary_currency,
+    ) = extract_indeed_source_salary(
+        section_text
+    )
+
+    # =====================================================
+    # EXPERIENCE
+    # =====================================================
+
+    (
+        experience_required,
+        experience_min,
+        experience_max,
+    ) = extract_experience(
+        job_description
+    )
+
+    # =====================================================
+    # SKILLS
+    # =====================================================
+
+    skills = extract_skills(
+        job_description
+    )
+
+    # =====================================================
+    # CATEGORY
+    # =====================================================
+
+    category = detect_job_category(
+        job_title,
+        job_description,
+    )
+
+    # =====================================================
+    # POSTED DATE
+    # =====================================================
+
+    posted_date = (
+        extract_indeed_source_posted_date(
+            section_text
+        )
+    )
+
+    return {
+
+        "job_key":
+            job_key,
+
+        "job_title":
+            job_title,
+
+        "company_name":
+            company_name,
+
+        "company_website":
+            "",
+
+        "job_description":
+            job_description,
+
+        "skills_required":
+            skills,
+
+        "experience_required":
+            experience_required,
+
+        "experience_min_years":
+            experience_min,
+
+        "experience_max_years":
+            experience_max,
+
+        "salary_min":
+            salary_min,
+
+        "salary_max":
+            salary_max,
+
+        "salary_currency":
+            salary_currency,
+
+        "location":
+            cleaned_location,
+
+        "city":
+            city,
+
+        "state":
+            state,
+
+        "country":
+            country,
+
+        "remote_type":
+            remote_type,
+
+        "employment_type":
+            employment_type,
+
+        "job_category":
+            category,
+
+        "posted_date":
+            posted_date,
+
+        "apply_url":
+            apply_url,
+    }
+
+
+# ============================================================
 # MAIN EXTRACTION
 # ============================================================
+
+
 
 def extract_job_data(
     raw_text,
     source_url,
 ):
-
+    
     # =====================================================
-    # 1. NORMALIZE RAW TEXT
+    # 1. UNWRAP VIEW SOURCE FILE
     # =====================================================
 
-    text = normalize_text(
-        raw_text
+    source_html = (
+        unwrap_view_source_file(
+            raw_text
+        )
     )
 
     # =====================================================
-    # 2. DETECT SOURCE PLATFORM FIRST
+    # 2. NORMALIZED TEXT
+    #
+    # Keep this because old Shine and LinkedIn
+    # parsers still use visible-text parsing.
     # =====================================================
-    #
-    # IMPORTANT:
-    # We must detect the portal before running
-    # portal-specific extraction.
-    #
-    # Shine and LinkedIn have different page structures.
+
+    text = normalize_text(
+        source_html
+    )
+
+    # =====================================================
+    # 3. DETECT SOURCE PLATFORM
     # =====================================================
 
     source_platform = (
         detect_source_platform(
-            text,
+            source_html,
             source_url,
         )
     )
+
 
     # =====================================================
     # DEFAULT VALUES
@@ -2618,6 +2630,7 @@ def extract_job_data(
     job_title = ""
     company_name = ""
     company_website = ""
+    indeed_data = {}
 
     job_description = ""
     skills = ""
@@ -3071,33 +3084,88 @@ def extract_job_data(
     #
     # etc.
     # =====================================================
+
     # =====================================================
-    # INDEED EXTRACTION
+    # INDEED VIEW-SOURCE EXTRACTION
     # =====================================================
 
     elif source_platform == "Indeed":
 
         # -------------------------------------------------
-        # Keep only selected Indeed job.
+        # 1. ISOLATE ONLY THE SELECTED JOB SECTION
+        #
+        # <section id="job-full-details">
         # -------------------------------------------------
 
-        main_text = (
-            isolate_indeed_job_text(
-                text
+        indeed_job_html = (
+            isolate_indeed_job_section(
+                source_html
             )
         )
 
+        if not indeed_job_html:
+
+            raise ValueError(
+                "Indeed selected job section "
+                "'job-full-details' was not found "
+                "inside the uploaded source file."
+            )
+
         # -------------------------------------------------
-        # HEADER
+        # 2. EXTRACT JOB DATA FROM THAT SECTION
         # -------------------------------------------------
 
-        (
-            job_title,
-            company_name,
-            location,
-            header_remote_type,
-        ) = extract_indeed_header(
-            main_text
+        indeed_data = (
+            extract_indeed_job_from_section(
+                indeed_job_html
+            )
+        )
+
+        if not indeed_data:
+
+            raise ValueError(
+                "Indeed job details could not "
+                "be extracted from "
+                "'job-full-details'."
+            )
+
+        # -------------------------------------------------
+        # MAIN TEXT
+        #
+        # Used later as fallback for ID generation.
+        # -------------------------------------------------
+
+        main_text = (
+            indeed_job_html
+        )
+
+        # -------------------------------------------------
+        # JOB TITLE
+        # -------------------------------------------------
+
+        job_title = (
+           indeed_data.get(
+                "job_title",
+                "",
+           )
+        )
+
+        # -------------------------------------------------
+        # COMPANY
+        # -------------------------------------------------
+
+        company_name = (
+            indeed_data.get(
+                "company_name",
+                "",
+            )
+        )
+
+        company_website = (
+            indeed_data.get(
+                "company_website",
+                "",
+            )
         )
 
         # -------------------------------------------------
@@ -3105,8 +3173,20 @@ def extract_job_data(
         # -------------------------------------------------
 
         job_description = (
-            extract_indeed_job_description(
-                main_text
+            indeed_data.get(
+                "job_description",
+                "",
+            )
+        )
+
+        # -------------------------------------------------
+        # SKILLS
+        # -------------------------------------------------
+
+        skills = (
+            indeed_data.get(
+                "skills_required",
+                "",
             )
         )
 
@@ -3114,54 +3194,92 @@ def extract_job_data(
         # EXPERIENCE
         # -------------------------------------------------
 
-        (
-            experience_required,
-            experience_min,
-            experience_max,
-        ) = extract_indeed_experience(
-            main_text
+        experience_required = (
+            indeed_data.get(
+                "experience_required",
+                "",
+            )
+        )
+
+        experience_min = (
+            indeed_data.get(
+                "experience_min_years",
+                "",
+            )
+        )
+
+        experience_max = (
+            indeed_data.get(
+                "experience_max_years",
+                "",
+            )
         )
 
         # -------------------------------------------------
-        # SALARY
+        #  SALARY
         # -------------------------------------------------
 
-        (
-            salary_min,
-            salary_max,
-            salary_currency,
-        ) = extract_indeed_salary(
-            main_text
+        salary_min = (
+            indeed_data.get(
+                "salary_min",
+                "",
+            )
+        )
+
+        salary_max = (
+            indeed_data.get(
+                "salary_max",
+                "",
+            )
+        )
+
+        salary_currency = (
+            indeed_data.get(
+                "salary_currency",
+                "",
+            )
         )
 
         # -------------------------------------------------
         # LOCATION
         # -------------------------------------------------
 
-        (
-            city,
-            state,
-            country,
-        ) = parse_indeed_location(
-            location
+        location = (
+            indeed_data.get(
+                "location",
+                "",
+            )
+        )
+
+        city = (
+            indeed_data.get(
+                "city",
+                "",
+            )
+        )
+
+        state = (
+            indeed_data.get(
+                "state",
+                "",
+            )
+        )
+
+        country = (
+            indeed_data.get(
+                "country",
+                "",
+            )
         )
 
         # -------------------------------------------------
-        # SKILLS
-        # -------------------------------------------------
-
-        skills = extract_skills(
-            job_description
-        )
-
-        # -------------------------------------------------
-        # REMOTE TYPE
+        # WORK MODE
         # -------------------------------------------------
 
         remote_type = (
-            detect_indeed_remote_type(
-                main_text,
-                header_remote_type,
+            indeed_data.get(
+                "remote_type",
+                "",
             )
         )
 
@@ -3170,8 +3288,9 @@ def extract_job_data(
         # -------------------------------------------------
 
         employment_type = (
-            extract_indeed_employment_type(
-                main_text
+            indeed_data.get(
+                "employment_type",
+                "",
             )
         )
 
@@ -3180,45 +3299,32 @@ def extract_job_data(
         # -------------------------------------------------
 
         category = (
-            detect_job_category(
-                job_title,
-                job_description,
+            indeed_data.get(
+                "job_category",
+                "",
             )
         )
 
         # -------------------------------------------------
         # POSTED DATE
-        #
-        # Your provided selected Indeed job block does NOT
-        # contain a posted date.
-        #
-        # Therefore leave blank rather than guessing.
         # -------------------------------------------------
 
-        posted_date = ""
-
-        # -------------------------------------------------
-        # COMPANY WEBSITE
-        # -------------------------------------------------
-
-        company_website = (
-            extract_company_website(
-                main_text
+        posted_date = (
+            indeed_data.get(
+                "posted_date",
+                "",
             )
         )
 
         # -------------------------------------------------
         # APPLY URL
-        #
-        # Copied text does not contain the actual apply URL.
         # -------------------------------------------------
 
-        apply_url = get_label_value(
-            main_text,
-            [
-                "Apply URL",
-                "Application URL",
-            ],
+        apply_url = (
+            indeed_data.get(
+                "apply_url",
+                "",
+            )
         )
 
     else:
@@ -3372,12 +3478,32 @@ def extract_job_data(
     # INTERNAL JOB ID
     # =====================================================
 
-    internal_job_id = (
-        generate_internal_job_id(
-            main_text,
-            source_url,
+    if (
+        source_platform == "Indeed"
+        and indeed_data.get(
+            "job_key"
         )
-    )
+    ):
+
+        # Indeed already gives us a stable job key.
+        #
+        # Example:
+        # d58f533f017a275e
+
+        internal_job_id = (
+            indeed_data.get(
+                "job_key"
+            )
+        )
+
+    else:
+
+        internal_job_id = (
+            generate_internal_job_id(
+                main_text,
+                source_url,
+            )
+        )
 
     # =====================================================
     # JOB ID
