@@ -965,107 +965,371 @@ def extract_company_website(text):
 
 
 # ============================================================
-# SOURCE PLATFORM
+# SOURCE PLATFORM DETECTION
 # ============================================================
 
 def detect_source_platform(
-    text,
-    source_url,
+    source_html,
+    source_url="",
 ):
     """
     Detect the actual job portal.
 
-    IMPORTANT:
-    Prefer strong page-specific markers instead of
-    generic social-media URLs inside page HTML.
+    Priority:
+
+    1. User-provided source URL
+    2. Strong portal-specific HTML markers
+    3. Multiple-marker scoring
+
+    Do not identify a portal only because its social-media
+    URL appears somewhere in another portal's footer.
     """
 
     source_url_lower = (
         source_url or ""
     ).lower()
 
-    lower = (
-        text or ""
+    html_lower = (
+        source_html or ""
     ).lower()
 
     # =====================================================
-    # 1. SOURCE URL IS STRONGEST
+    # 1. SOURCE URL
     # =====================================================
 
-    if "shine.com" in source_url_lower:
-        return "Shine"
+    url_platforms = [
+        (
+            "Shine",
+            [
+                "shine.com",
+            ],
+        ),
 
-    if "indeed.com" in source_url_lower:
+        (
+            "Indeed",
+            [
+                "indeed.com",
+            ],
+        ),
+
+        (
+            "LinkedIn",
+            [
+                "linkedin.com/jobs",
+            ],
+        ),
+
+        (
+            "Naukri",
+            [
+                "naukri.com/job-listings",
+                "naukri.com/job",
+            ],
+        ),
+
+        (
+            "Foundit",
+            [
+                "foundit.in/job",
+                "foundit.in/job-vacancy",
+            ],
+        ),
+
+        (
+            "Glassdoor",
+            [
+                "glassdoor.co.in/job-listing",
+                "glassdoor.com/job-listing",
+            ],
+        ),
+
+        (
+            "Internshala",
+            [
+                "internshala.com/job",
+                "internshala.com/internship",
+            ],
+        ),
+
+        (
+            "TimesJobs",
+            [
+                "timesjobs.com/job-detail",
+            ],
+        ),
+
+        (
+            "Freshersworld",
+            [
+                "freshersworld.com/jobs",
+            ],
+        ),
+
+        (
+            "Greenhouse",
+            [
+                "greenhouse.io",
+            ],
+        ),
+
+        (
+            "Lever",
+            [
+                "lever.co",
+            ],
+        ),
+    ]
+
+    for platform, patterns in url_platforms:
+
+        for pattern in patterns:
+
+            if pattern in source_url_lower:
+                return platform
+
+    # =====================================================
+    # 2. STRONG HTML MARKERS
+    # =====================================================
+
+    platform_markers = {
+
+        "Indeed": [
+            'id="job-full-details"',
+            "viewjobssrroot",
+            "jobsearch-rightpane",
+            "jobsearch-jobinfoheader-title",
+            "jobsearch-viewjobcontainerwrapper",
+            "data-indeed-apply-jk",
+            'id="jobdescriptiontext"',
+        ],
+
+        "Shine": [
+            "jdleft_jdbodyleft__",
+            "jdleft_jdleft__",
+            "jdright_jdbodyright__",
+            "staticcand.shine.com",
+        ],
+
+        "LinkedIn": [
+            "jobs-details__main-content",
+            "job-details-jobs-unified-top-card",
+            "jobs-description__content",
+            "linkedin corporation",
+            "jobs-search__job-details",
+        ],
+
+        "Naukri": [
+            "styles_jd-header",
+            "jobdesc",
+            "styles_job-desc-container",
+            "naukri.com/job-listings",
+        ],
+
+        "Foundit": [
+            "job-description",
+            "foundit.in",
+            "jobdetail",
+        ],
+
+        "Internshala": [
+            "internship_details",
+            "internship_heading",
+            "internshala",
+        ],
+
+        "TimesJobs": [
+            "job-detail",
+            "jd-jobid",
+            "timesjobs",
+        ],
+
+        "Freshersworld": [
+            "job-container",
+            "freshersworld",
+        ],
+
+        "Glassdoor": [
+            "jobdetails",
+            "glassdoor",
+        ],
+    }
+
+    # =====================================================
+    # 3. SCORE EACH PORTAL
+    # =====================================================
+
+    scores = {}
+
+    for platform, markers in (
+        platform_markers.items()
+    ):
+
+        score = 0
+
+        for marker in markers:
+
+            if marker in html_lower:
+
+                score += 1
+
+        scores[platform] = score
+
+    # =====================================================
+    # REQUIRE MULTIPLE MARKERS WHEN POSSIBLE
+    # =====================================================
+
+    best_platform = ""
+    best_score = 0
+
+    for platform, score in scores.items():
+
+        if score > best_score:
+
+            best_platform = platform
+            best_score = score
+
+    if best_score >= 2:
+
+        return best_platform
+
+    # Some extremely strong markers can identify
+    # the portal by themselves.
+
+    if 'id="job-full-details"' in html_lower:
         return "Indeed"
 
-    if "linkedin.com" in source_url_lower:
-        return "LinkedIn"
-
-    if "naukri.com" in source_url_lower:
-        return "Naukri"
-
-    if "greenhouse" in source_url_lower:
-        return "Greenhouse"
-
-    if "lever.co" in source_url_lower:
-        return "Lever"
-
-    # =====================================================
-    # 2. SHINE PAGE-SPECIFIC MARKERS
-    # =====================================================
-    #
-    # Do this BEFORE LinkedIn because Shine footer/source
-    # can contain LinkedIn social-media URLs.
-    # =====================================================
-
-    if (
-        "jdleft_jdbodyleft__" in lower
-        or "jdleft_jdleft__" in lower
-        or "jdright_jdbodyright__" in lower
-        or "staticcand.shine.com" in lower
-        or (
-            "__next_data__" in lower
-            and "shine.com" in lower
-        )
-    ):
+    if "jdleft_jdbodyleft__" in html_lower:
         return "Shine"
-
-    # =====================================================
-    # 3. INDEED
-    # =====================================================
-
-    if (
-        'id="job-full-details"' in lower
-        or "jobsearch-viewjobcontainerwrapper" in lower
-        or "indeed.com/viewjob" in lower
-    ):
-        return "Indeed"
-
-    # =====================================================
-    # 4. LINKEDIN
-    # =====================================================
-
-    if (
-        "get job alerts for this search" in lower
-        or "responses managed off linkedin" in lower
-        or "linkedin corporation" in lower
-    ):
-        return "LinkedIn"
-
-    # =====================================================
-    # 5. OTHER SOURCES
-    # =====================================================
-
-    if "naukri.com" in lower:
-        return "Naukri"
-
-    if "greenhouse" in lower:
-        return "Greenhouse"
-
-    if "lever.co" in lower:
-        return "Lever"
 
     return "Other"
+
+# ============================================================
+# GENERIC JOBPOSTING JSON-LD EXTRACTOR
+# ============================================================
+
+def extract_jobposting_json_ld(
+    source_html,
+):
+    """
+    Find a Schema.org JobPosting object from any website.
+
+    This is NOT Shine-specific.
+
+    It can potentially work with:
+    Shine,
+    Naukri,
+    company career pages,
+    ATS pages,
+    and other job portals.
+    """
+
+    if not source_html:
+        return {}
+
+    soup = BeautifulSoup(
+        source_html,
+        "html.parser",
+    )
+
+    scripts = soup.find_all(
+        "script",
+        attrs={
+            "type": "application/ld+json",
+        },
+    )
+
+    def find_jobposting(
+        value,
+    ):
+
+        if isinstance(
+            value,
+            dict,
+        ):
+
+            object_type = (
+                value.get(
+                    "@type"
+                )
+            )
+
+            if object_type == "JobPosting":
+
+                return value
+
+            if (
+                isinstance(
+                    object_type,
+                    list,
+                )
+                and "JobPosting"
+                in object_type
+            ):
+
+                return value
+
+            # JSON-LD often stores objects under:
+            #
+            # @graph
+            #
+            # so search recursively.
+
+            for child in value.values():
+
+                result = find_jobposting(
+                    child
+                )
+
+                if result:
+                    return result
+
+        elif isinstance(
+            value,
+            list,
+        ):
+
+            for child in value:
+
+                result = find_jobposting(
+                    child
+                )
+
+                if result:
+                    return result
+
+        return {}
+
+    for script in scripts:
+
+        raw_json = (
+            script.string
+            or script.get_text()
+        )
+
+        if not raw_json:
+            continue
+
+        try:
+
+            data = json.loads(
+                raw_json
+            )
+
+        except (
+            json.JSONDecodeError,
+            TypeError,
+        ):
+
+            continue
+
+        result = find_jobposting(
+            data
+        )
+
+        if result:
+            return result
+
+    return {}
 
 # ============================================================
 # SOURCE TYPE
@@ -1469,38 +1733,150 @@ def unwrap_view_source_file(raw_text):
     return raw_text
 
 # ============================================================
-# ISOLATE INDEED SELECTED JOB
+# ISOLATE INDEED SELECTED JOB RIGHT PANE
 # ============================================================
 
 def isolate_indeed_job_section(
     source_html,
 ):
     """
-    Keep only the currently selected Indeed job.
+    Extract the complete selected Indeed job area.
 
-    Expected starting element:
+    Primary starting container:
 
-    <section id="job-full-details">
-        ...
-    </section>
+    <div class="jobsearch-RightPane ...">
+
+    We intentionally match only the stable class:
+        jobsearch-RightPane
+
+    We DO NOT depend on generated classes such as:
+        css-6iabie
+        eu4oa1w0
+
+    because Indeed may change those values.
+
+    Fallbacks are kept so older Indeed source files
+    continue working.
     """
+
+    if not source_html:
+        return ""
 
     soup = BeautifulSoup(
         source_html,
         "html.parser",
     )
 
+    # =====================================================
+    # 1. PRIMARY:
+    # COMPLETE INDEED RIGHT PANE
+    # =====================================================
+
+    right_pane = soup.select_one(
+        "div.jobsearch-RightPane"
+    )
+
+    if right_pane:
+
+        return str(
+            right_pane
+        )
+
+    # =====================================================
+    # 2. FALLBACK:
+    # OLD SELECTED JOB SECTION
+    # =====================================================
+
     job_section = soup.find(
         "section",
         id="job-full-details",
     )
 
-    if not job_section:
-        return ""
+    if job_section:
 
-    return str(
-        job_section
+        return str(
+            job_section
+        )
+
+    # =====================================================
+    # 3. FALLBACK:
+    # INDEED SSR ROOT
+    # =====================================================
+
+    view_job_root = soup.find(
+        id="viewJobSSRRoot"
     )
+
+    if view_job_root:
+
+        parent_right_pane = (
+            view_job_root.find_parent(
+                "div",
+                class_=lambda value:
+                    value
+                    and (
+                        "jobsearch-RightPane"
+                        in str(value)
+                    )
+            )
+        )
+
+        if parent_right_pane:
+
+            return str(
+                parent_right_pane
+            )
+
+        parent_section = (
+            view_job_root.find_parent(
+                "section"
+            )
+        )
+
+        if parent_section:
+
+            return str(
+                parent_section
+            )
+
+        return str(
+            view_job_root
+        )
+
+    # =====================================================
+    # 4. FINAL FALLBACK:
+    # JOB DESCRIPTION
+    # =====================================================
+
+    description_tag = soup.find(
+        id="jobDescriptionText"
+    )
+
+    if description_tag:
+
+        parent_right_pane = (
+            description_tag.find_parent(
+                "div",
+                class_=lambda value:
+                    value
+                    and (
+                        "jobsearch-RightPane"
+                        in str(value)
+                    )
+            )
+        )
+
+        if parent_right_pane:
+
+            return str(
+                parent_right_pane
+            )
+
+        return str(
+            description_tag.parent
+        )
+
+    return ""
 
 # ============================================================
 # INDEED SOURCE LOCATION
@@ -2076,6 +2452,19 @@ def extract_indeed_job_from_section(
         strip=True,
     )
 
+    section_text = (
+        section_text
+        .replace(
+            "\xa0",
+            " ",
+        )
+    )
+
+    section_text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        section_text,
+    ).strip()
     # =====================================================
     # JOB KEY + COUNTRY
     # =====================================================
@@ -2311,6 +2700,9 @@ def extract_indeed_job_from_section(
 
         "apply_url":
             apply_url,
+
+        "job_details_text":
+            section_text,
     }
 
 # ============================================================
@@ -2787,7 +3179,7 @@ def extract_shine_source_job(
     # =====================================================
 
     jobposting = (
-        extract_shine_jobposting_json_ld(
+        extract_jobposting_json_ld(
             source_html
         )
     )
@@ -3353,6 +3745,303 @@ def extract_shine_source_job(
     }
 
 # ============================================================
+# HTML -> CLEAN TEXT
+# ============================================================
+
+def html_to_clean_text(
+    html_content,
+):
+
+    if not html_content:
+        return ""
+
+    soup = BeautifulSoup(
+        html_content,
+        "html.parser",
+    )
+
+    for unwanted in soup.find_all(
+        [
+            "script",
+            "style",
+            "noscript",
+            "svg",
+        ]
+    ):
+
+        unwanted.decompose()
+
+    text = soup.get_text(
+        "\n",
+        strip=True,
+    )
+
+    text = text.replace(
+        "\xa0",
+        " ",
+    )
+
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    )
+
+    return text.strip()
+
+# ============================================================
+# PORTAL PARSER DISPATCHER
+# ============================================================
+
+def extract_portal_job(
+    source_platform,
+    source_html,
+    normalized_text,
+):
+
+    # =====================================================
+    # INDEED
+    # =====================================================
+
+    if source_platform == "Indeed":
+
+        indeed_job_html = (
+            isolate_indeed_job_section(
+                source_html
+            )
+        )
+
+        if not indeed_job_html:
+
+            raise ValueError(
+                "Indeed selected-job section "
+                "could not be found."
+            )
+
+        return (
+            extract_indeed_job_from_section(
+                indeed_job_html
+            )
+        )
+
+    # =====================================================
+    # SHINE
+    # =====================================================
+
+    if source_platform == "Shine":
+
+        return (
+            extract_shine_source_job(
+                source_html
+            )
+        )
+
+    # =====================================================
+    # LINKEDIN
+    #
+    # Currently old text parser.
+    # Later replace with View-Source parser.
+    # =====================================================
+
+    if source_platform == "LinkedIn":
+
+        return (
+            extract_linkedin_normalized_job(
+                normalized_text
+            )
+        )
+
+    # =====================================================
+    # FUTURE
+    # =====================================================
+
+    # if source_platform == "Naukri":
+    #     return extract_naukri_source_job(
+    #         source_html
+    #     )
+
+    # if source_platform == "Foundit":
+    #     return extract_foundit_source_job(
+    #         source_html
+    #     )
+
+    return {}
+
+def extract_linkedin_normalized_job(
+    text,
+):
+
+    result = empty_extracted_job()
+
+    main_text = (
+        isolate_linkedin_job_text(
+            text
+        )
+    )
+
+    (
+        job_title,
+        company_name,
+        location,
+        posted_date_raw,
+    ) = extract_linkedin_header(
+        main_text
+    )
+
+    job_description = (
+        extract_linkedin_job_description(
+            main_text
+        )
+    )
+
+    (
+        experience_required,
+        experience_min,
+        experience_max,
+    ) = extract_experience(
+        job_description
+    )
+
+    if not experience_required:
+
+        (
+            experience_required,
+            experience_min,
+            experience_max,
+        ) = extract_experience(
+            main_text
+        )
+
+    (
+        salary_min,
+        salary_max,
+        salary_currency,
+    ) = extract_salary(
+        main_text
+    )
+
+    (
+        city,
+        state,
+        country,
+    ) = parse_linkedin_location(
+        location
+    )
+
+    skills = extract_skills(
+        job_description
+    )
+
+    remote_type = (
+        detect_linkedin_remote_type(
+            main_text
+        )
+    )
+
+    employment_type = (
+        extract_linkedin_employment_type(
+            main_text
+        )
+    )
+
+    category = (
+        extract_linkedin_job_category(
+            main_text,
+            job_title,
+            job_description,
+        )
+    )
+
+    posted_date = (
+        convert_relative_posted_date(
+            posted_date_raw
+        )
+    )
+
+    company_website = (
+        extract_company_website(
+            main_text
+        )
+    )
+
+    apply_url = get_label_value(
+        main_text,
+        [
+            "Apply URL",
+            "Application URL",
+        ],
+    )
+
+    result.update({
+
+        "job_title":
+            job_title,
+
+        "company_name":
+            company_name,
+
+        "company_website":
+            company_website,
+
+        "job_description":
+            job_description,
+
+        "skills_required":
+            skills,
+
+        "experience_required":
+            experience_required,
+
+        "experience_min_years":
+            experience_min,
+
+        "experience_max_years":
+            experience_max,
+
+        "salary_min":
+            salary_min,
+
+        "salary_max":
+            salary_max,
+
+        "salary_currency":
+            salary_currency,
+
+        "location":
+            location,
+
+        "city":
+            city,
+
+        "state":
+            state,
+
+        "country":
+            country,
+
+        "remote_type":
+            remote_type,
+
+        "employment_type":
+            employment_type,
+
+        "job_category":
+            category,
+
+        "posted_date":
+            posted_date,
+
+        "apply_url":
+            apply_url,
+
+        "job_details_text":
+            main_text,
+    })
+
+    return result
+
+
+# ============================================================
 # ISOLATE SHINE SELECTED JOB AS PLAIN TEXT
 # ============================================================
 
@@ -3537,15 +4226,13 @@ def extract_shine_job_description_from_text(
 # MAIN EXTRACTION
 # ============================================================
 
-
-
 def extract_job_data(
     raw_text,
     source_url,
 ):
-    
+
     # =====================================================
-    # 1. UNWRAP VIEW SOURCE FILE
+    # 1. RECONSTRUCT ORIGINAL SOURCE
     # =====================================================
 
     source_html = (
@@ -3555,18 +4242,17 @@ def extract_job_data(
     )
 
     # =====================================================
-    # 2. NORMALIZED TEXT
-    #
-    # Keep this because old Shine and LinkedIn
-    # parsers still use visible-text parsing.
+    # 2. TEXT VERSION FOR FALLBACK PARSERS
     # =====================================================
 
-    text = normalize_text(
-        source_html
+    normalized_text = (
+        normalize_text(
+            source_html
+        )
     )
 
     # =====================================================
-    # 3. DETECT SOURCE PLATFORM
+    # 3. DETECT PLATFORM
     # =====================================================
 
     source_platform = (
@@ -3576,853 +4262,182 @@ def extract_job_data(
         )
     )
 
+    # Fallback to original TXT if needed.
+    if source_platform == "Other":
+
+        source_platform = (
+            detect_source_platform(
+                raw_text,
+                source_url,
+            )
+        )
 
     # =====================================================
-    # DEFAULT VALUES
+    # 4. CALL CORRECT PORTAL ADAPTER
     # =====================================================
 
-    job_title = ""
-    company_name = ""
-    company_website = ""
-    indeed_data = {}
-    shine_data = {}
-
-    job_description = ""
-    skills = ""
-
-    experience_required = ""
-    experience_min = ""
-    experience_max = ""
-
-    salary_min = ""
-    salary_max = ""
-    salary_currency = ""
-
-    location = ""
-    city = ""
-    state = ""
-    country = ""
-
-    remote_type = ""
-    employment_type = ""
-    category = ""
-
-    posted_date = ""
-    expiry_date = ""
-    application_deadline = ""
-
-    apply_url = ""
+    extracted = (
+        extract_portal_job(
+            source_platform,
+            source_html,
+            normalized_text,
+        )
+    )
 
     # =====================================================
-    # 3. LINKEDIN EXTRACTION
+    # 5. GENERIC FALLBACK
     # =====================================================
 
-    if source_platform == "LinkedIn":
+    if not extracted:
 
-        # -------------------------------------------------
-        # Remove LinkedIn search-result jobs and keep only
-        # the currently opened job.
-        # -------------------------------------------------
-
-        main_text = (
-            isolate_linkedin_job_text(
-                text
+        extracted = (
+            extract_generic_job(
+                source_html,
+                normalized_text,
             )
         )
 
-        # -------------------------------------------------
-        # LINKEDIN HEADER
-        #
-        # Example:
-        #
-        # Netlink Computer Inc
-        # Python Developer
-        # Bhopal, Madhya Pradesh, India · 4 days ago ...
-        #
-        # LinkedIn order:
-        #
-        # company_name
-        # job_title
-        # location + posted_date
-        # -------------------------------------------------
-
-        (
-            job_title,
-            company_name,
-            location,
-            posted_date_raw,
-        ) = extract_linkedin_header(
-            main_text
-        )
-
-        # -------------------------------------------------
-        # JOB DESCRIPTION
-        # -------------------------------------------------
-
-        job_description = (
-            extract_linkedin_job_description(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # EXPERIENCE
-        #
-        # Example:
-        #
-        # Experience: 2 to 7 Years
-        # -------------------------------------------------
-
-        (
-            experience_required,
-            experience_min,
-            experience_max,
-        ) = extract_experience(
-            job_description
-        )
-
-        # Fallback:
-        # sometimes experience can be outside
-        # About the job description.
-        if not experience_required:
-
-            (
-                experience_required,
-                experience_min,
-                experience_max,
-            ) = extract_experience(
-                main_text
-            )
-
-        # -------------------------------------------------
-        # SALARY
-        # -------------------------------------------------
-
-        (
-            salary_min,
-            salary_max,
-            salary_currency,
-        ) = extract_salary(
-            main_text
-        )
-
-        # -------------------------------------------------
-        # LOCATION
-        #
-        # Example:
-        #
-        # Bhopal, Madhya Pradesh, India
-        #
-        # city    = Bhopal
-        # state   = Madhya Pradesh
-        # country = India
-        # -------------------------------------------------
-
-        (
-            city,
-            state,
-            country,
-        ) = parse_linkedin_location(
-            location
-        )
-
-        # -------------------------------------------------
-        # SKILLS
-        # -------------------------------------------------
-
-        skills = extract_skills(
-            job_description
-        )
-
-        # -------------------------------------------------
-        # REMOTE TYPE
-        # -------------------------------------------------
-
-        remote_type = (
-            detect_linkedin_remote_type(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # EMPLOYMENT TYPE
-        #
-        # Example:
-        #
-        # Full-time
-        #
-        # OR
-        #
-        # Job Type: Full Time
-        # -------------------------------------------------
-
-        employment_type = (
-            extract_linkedin_employment_type(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # JOB CATEGORY
-        #
-        # Prefer explicit:
-        #
-        # Job Category: Development
-        #
-        # otherwise derive from title/description.
-        # -------------------------------------------------
-
-        category = (
-            extract_linkedin_job_category(
-                main_text,
-                job_title,
-                job_description,
-            )
-        )
-
-        # -------------------------------------------------
-        # POSTED DATE
-        #
-        # Example:
-        #
-        # 4 days ago
-        # -------------------------------------------------
-
-        posted_date = (
-            convert_relative_posted_date(
-                posted_date_raw
-            )
-        )
-
-        # -------------------------------------------------
-        # COMPANY WEBSITE
-        # -------------------------------------------------
-
-        company_website = (
-            extract_company_website(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # APPLY URL
-        #
-        # Normally copied LinkedIn text will not contain
-        # the real application URL.
-        # -------------------------------------------------
-
-        apply_url = get_label_value(
-            main_text,
-            [
-                "Apply URL",
-                "Application URL",
-            ],
-        )
-
-        # =====================================================
-        # SHINE VIEW-SOURCE EXTRACTION
-        # =====================================================
-
-    elif source_platform == "Shine":
-
-        shine_data = (
-            extract_shine_source_job(
-                source_html
-            )
-        )
-
-        if not shine_data:
-
-            raise ValueError(
-                "Shine JobPosting data could not "
-                "be found inside the uploaded "
-                "View Source file."
-            )
-
-        # -------------------------------------------------
-        # MAIN TEXT
-        # -------------------------------------------------
-
-        main_text = (
-            shine_data.get(
-                "job_description",
-                "",
-            )
-            or shine_data.get(
-                "job_description",
-                "",
-            )
-        )
-        if not main_text:
-            main_text=""
-
-        # -------------------------------------------------
-        # TITLE
-        # -------------------------------------------------
-
-        job_title = shine_data.get(
-            "job_title",
-            "",
-        )
-
-        # -------------------------------------------------
-        # COMPANY
-        # -------------------------------------------------
-
-        company_name = shine_data.get(
-            "company_name",
-            "",
-        )
-
-        company_website = shine_data.get(
-            "company_website",
-            "",
-        )
-
-        # -------------------------------------------------
-        # DESCRIPTION
-        # -------------------------------------------------
-
-        job_description = shine_data.get(
-            "job_description",
-            "",
-        )
-
-        # -------------------------------------------------
-        # SKILLS
-        # -------------------------------------------------
-
-        skills = shine_data.get(
-            "skills_required",
-            "",
-        )
-
-        # -------------------------------------------------
-        # EXPERIENCE
-        # -------------------------------------------------
-
-        experience_required = shine_data.get(
-            "experience_required",
-            "",
-        )
-
-        experience_min = shine_data.get(
-            "experience_min_years",
-            "",
-        )
-
-        experience_max = shine_data.get(
-            "experience_max_years",
-            "",
-        )
-
-        # -------------------------------------------------
-        # SALARY
-        # -------------------------------------------------
-
-        salary_min = shine_data.get(
-            "salary_min",
-            "",
-        )
-
-        salary_max = shine_data.get(
-            "salary_max",
-            "",
-        )
-
-        salary_currency = shine_data.get(
-            "salary_currency",
-            "",
-        )
-
-        # -------------------------------------------------
-        # LOCATION
-        # -------------------------------------------------
-
-        location = shine_data.get(
-            "location",
-            "",
-        )
-
-        city = shine_data.get(
-            "city",
-            "",
-        )
-
-        state = shine_data.get(
-            "state",
-            "",
-        )
-
-        country = shine_data.get(
-            "country",
-            "",
-        )
-
-        # -------------------------------------------------
-        # WORK MODE
-        # -------------------------------------------------
-
-        remote_type = shine_data.get(
-            "remote_type",
-            "",
-        )
-
-        # -------------------------------------------------
-        # EMPLOYMENT TYPE
-        # -------------------------------------------------
-
-        employment_type = shine_data.get(
-            "employment_type",
-            "",
-        )
-
-        # -------------------------------------------------
-        # CATEGORY
-        # -------------------------------------------------
-
-        category = shine_data.get(
-            "job_category",
-            "",
-        )
-
-        # -------------------------------------------------
-        # POSTED DATE
-        # -------------------------------------------------
-
-        posted_date = shine_data.get(
-            "posted_date",
-            "",
-        )
-
-        # -------------------------------------------------
-        # EXPIRY DATE
-        # -------------------------------------------------
-
-        expiry_date = shine_data.get(
-            "expiry_date",
-            "",
-        )
-
-        # -------------------------------------------------
-        # APPLICATION DEADLINE
-        # -------------------------------------------------
-
-        application_deadline = shine_data.get(
+    # =====================================================
+    # 6. NORMALIZED VALUES
+    # =====================================================
+
+    job_title = extracted.get(
+        "job_title",
+        "",
+    )
+
+    company_name = extracted.get(
+        "company_name",
+        "",
+    )
+
+    company_website = extracted.get(
+        "company_website",
+        "",
+    )
+
+    job_description = extracted.get(
+        "job_description",
+        "",
+    )
+
+    skills = extracted.get(
+        "skills_required",
+        "",
+    )
+
+    experience_required = extracted.get(
+        "experience_required",
+        "",
+    )
+
+    experience_min = extracted.get(
+        "experience_min_years",
+        "",
+    )
+
+    experience_max = extracted.get(
+        "experience_max_years",
+        "",
+    )
+
+    salary_min = extracted.get(
+        "salary_min",
+        "",
+    )
+
+    salary_max = extracted.get(
+        "salary_max",
+        "",
+    )
+
+    salary_currency = extracted.get(
+        "salary_currency",
+        "",
+    )
+
+    location = extracted.get(
+        "location",
+        "",
+    )
+
+    city = extracted.get(
+        "city",
+        "",
+    )
+
+    state = extracted.get(
+        "state",
+        "",
+    )
+
+    country = extracted.get(
+        "country",
+        "",
+    )
+
+    remote_type = extracted.get(
+        "remote_type",
+        "",
+    )
+
+    employment_type = extracted.get(
+        "employment_type",
+        "",
+    )
+
+    category = extracted.get(
+        "job_category",
+        "",
+    )
+
+    posted_date = extracted.get(
+        "posted_date",
+        "",
+    )
+
+    expiry_date = extracted.get(
+        "expiry_date",
+        "",
+    )
+
+    application_deadline = (
+        extracted.get(
             "application_deadline",
             "",
         )
+    )
 
-        # -------------------------------------------------
-        #  APPLY URL
-        # -------------------------------------------------
+    apply_url = extracted.get(
+        "apply_url",
+        "",
+    )
 
-        apply_url = shine_data.get(
-            "apply_url",
+    # =====================================================
+    # SOURCE URL
+    # =====================================================
+
+    if not source_url:
+
+        source_url = extracted.get(
+            "source_url",
             "",
         )
 
-        # -------------------------------------------------
-        # SOURCE URL
-        #
-        # If user didn't provide one manually,
-        # use canonical Shine URL from source.
-        # -------------------------------------------------
-
-        if not source_url:
-
-            source_url = shine_data.get(
-                "source_url",
-                "",
-            )
-
-
     # =====================================================
-    # 5. OTHER JOB PORTALS
-    # =====================================================
-    #
-    # This is only a generic fallback.
-    #
-    # Later we can add:
-    #
-    # elif source_platform == "Indeed":
-    #
-    # elif source_platform == "Naukri":
-    #
-    # elif source_platform == "Foundit":
-    #
-    # etc.
+    # MAIN TEXT FOR FALLBACK HASH
     # =====================================================
 
-    # =====================================================
-    # INDEED VIEW-SOURCE EXTRACTION
-    # =====================================================
-
-    elif source_platform == "Indeed":
-
-        # -------------------------------------------------
-        # 1. ISOLATE ONLY THE SELECTED JOB SECTION
-        #
-        # <section id="job-full-details">
-        # -------------------------------------------------
-
-        indeed_job_html = (
-            isolate_indeed_job_section(
-                source_html
-            )
+    main_text = (
+        extracted.get(
+            "job_details_text",
+            "",
         )
-
-        if not indeed_job_html:
-
-            raise ValueError(
-                "Indeed selected job section "
-                "'job-full-details' was not found "
-                "inside the uploaded source file."
-            )
-
-        # -------------------------------------------------
-        # 2. EXTRACT JOB DATA FROM THAT SECTION
-        # -------------------------------------------------
-
-        indeed_data = (
-            extract_indeed_job_from_section(
-                indeed_job_html
-            )
-        )
-
-        if not indeed_data:
-
-            raise ValueError(
-                "Indeed job details could not "
-                "be extracted from "
-                "'job-full-details'."
-            )
-
-        # -------------------------------------------------
-        # MAIN TEXT
-        #
-        # Used later as fallback for ID generation.
-        # -------------------------------------------------
-
-        main_text = (
-            indeed_job_html
-        )
-
-        # -------------------------------------------------
-        # JOB TITLE
-        # -------------------------------------------------
-
-        job_title = (
-           indeed_data.get(
-                "job_title",
-                "",
-           )
-        )
-
-        # -------------------------------------------------
-        # COMPANY
-        # -------------------------------------------------
-
-        company_name = (
-            indeed_data.get(
-                "company_name",
-                "",
-            )
-        )
-
-        company_website = (
-            indeed_data.get(
-                "company_website",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # DESCRIPTION
-        # -------------------------------------------------
-
-        job_description = (
-            indeed_data.get(
-                "job_description",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # SKILLS
-        # -------------------------------------------------
-
-        skills = (
-            indeed_data.get(
-                "skills_required",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # EXPERIENCE
-        # -------------------------------------------------
-
-        experience_required = (
-            indeed_data.get(
-                "experience_required",
-                "",
-            )
-        )
-
-        experience_min = (
-            indeed_data.get(
-                "experience_min_years",
-                "",
-            )
-        )
-
-        experience_max = (
-            indeed_data.get(
-                "experience_max_years",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        #  SALARY
-        # -------------------------------------------------
-
-        salary_min = (
-            indeed_data.get(
-                "salary_min",
-                "",
-            )
-        )
-
-        salary_max = (
-            indeed_data.get(
-                "salary_max",
-                "",
-            )
-        )
-
-        salary_currency = (
-            indeed_data.get(
-                "salary_currency",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # LOCATION
-        # -------------------------------------------------
-
-        location = (
-            indeed_data.get(
-                "location",
-                "",
-            )
-        )
-
-        city = (
-            indeed_data.get(
-                "city",
-                "",
-            )
-        )
-
-        state = (
-            indeed_data.get(
-                "state",
-                "",
-            )
-        )
-
-        country = (
-            indeed_data.get(
-                "country",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # WORK MODE
-        # -------------------------------------------------
-
-        remote_type = (
-            indeed_data.get(
-                "remote_type",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # EMPLOYMENT TYPE
-        # -------------------------------------------------
-
-        employment_type = (
-            indeed_data.get(
-                "employment_type",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # CATEGORY
-        # -------------------------------------------------
-
-        category = (
-            indeed_data.get(
-                "job_category",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # POSTED DATE
-        # -------------------------------------------------
-
-        posted_date = (
-            indeed_data.get(
-                "posted_date",
-                "",
-            )
-        )
-
-        # -------------------------------------------------
-        # APPLY URL
-        # -------------------------------------------------
-
-        apply_url = (
-            indeed_data.get(
-                "apply_url",
-                "",
-            )
-        )
-
-    else:
-
-        main_text = text
-
-        # -------------------------------------------------
-        # Try generic labelled fields.
-        # -------------------------------------------------
-
-        job_title = get_label_value(
-            main_text,
-            [
-                "Job Title",
-                "Designation",
-            ],
-        )
-
-        company_name = get_label_value(
-            main_text,
-            [
-                "Company Name",
-                "Company",
-            ],
-        )
-
-        company_website = (
-            extract_company_website(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # Try generic job description.
-        # -------------------------------------------------
-
-        job_description = (
-            extract_job_description(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # EXPERIENCE
-        # -------------------------------------------------
-
-        (
-            experience_required,
-            experience_min,
-            experience_max,
-        ) = extract_experience(
-            main_text
-        )
-
-        # -------------------------------------------------
-        # SALARY
-        # -------------------------------------------------
-
-        (
-            salary_min,
-            salary_max,
-            salary_currency,
-        ) = extract_salary(
-            main_text
-        )
-
-        # -------------------------------------------------
-        # SKILLS
-        # -------------------------------------------------
-
-        skills = extract_skills(
-            job_description
-        )
-
-        # -------------------------------------------------
-        # REMOTE TYPE
-        # -------------------------------------------------
-
-        remote_type = (
-            detect_remote_type(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # EMPLOYMENT TYPE
-        # -------------------------------------------------
-
-        employment_type = (
-            extract_employment_type(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # CATEGORY
-        # -------------------------------------------------
-
-        category = (
-            detect_job_category(
-                job_title,
-                job_description,
-            )
-        )
-
-        # -------------------------------------------------
-        # DATE
-        # -------------------------------------------------
-
-        posted_date = (
-            extract_posted_date(
-                main_text
-            )
-        )
-
-        # -------------------------------------------------
-        # APPLY URL
-        # -------------------------------------------------
-
-        apply_url = get_label_value(
-            main_text,
-            [
-                "Apply URL",
-                "Application URL",
-            ],
-        )
+        or job_description
+    )
 
     # =====================================================
-    # 6. COMMON DATA FOR ALL JOB PORTALS
+    # SOURCE TYPE / SCORE
     # =====================================================
 
     source_type = (
@@ -4431,45 +4446,27 @@ def extract_job_data(
         )
     )
 
-    # =====================================================
-    # SOURCE SCORE
-    #
-    # ats_api      = 60
-    # career_page  = 40
-    # job_portal   = 30
-    # =====================================================
-
-    score = get_source_score(
-        source_type
+    score = (
+        get_source_score(
+            source_type
+        )
     )
 
     # =====================================================
-    # INTERNAL JOB ID
+    # STABLE PLATFORM JOB ID
     # =====================================================
-    if (
-        source_platform == "Shine"
-        and shine_data.get(
-            "job_key"
+
+    platform_job_key = (
+        extracted.get(
+            "job_key",
+            "",
         )
-    ):
+    )
+
+    if platform_job_key:
 
         internal_job_id = str(
-            shine_data.get(
-                "job_key"
-            )
-        )
-
-    elif (
-        source_platform == "Indeed"
-        and indeed_data.get(
-            "job_key"
-        )
-    ):
-
-        internal_job_id = str(
-            indeed_data.get(
-                "job_key"
-            )
+            platform_job_key
         )
 
     else:
@@ -4482,13 +4479,16 @@ def extract_job_data(
         )
 
     # =====================================================
-    # JOB ID
+    # COMMON JOB ID
     # =====================================================
 
     platform_prefix = (
         source_platform
         .lower()
-        .replace(" ", "_")
+        .replace(
+            " ",
+            "_",
+        )
     )
 
     job_id = (
@@ -4496,20 +4496,16 @@ def extract_job_data(
         f"{internal_job_id[:16]}"
     )
 
-    # =====================================================
-    # CURRENT FETCH / UPDATE TIME
-    # =====================================================
-
     now = (
         timezone.now()
         .isoformat()
     )
 
     # =====================================================
-    # 7. FINAL COMMON JOB DATA
+    # FINAL COMMON EXCEL ROW
     # =====================================================
 
-    job_data = {
+    return {
 
         "job_id":
             job_id,
@@ -4589,8 +4585,6 @@ def extract_job_data(
         "fetched_at":
             now,
 
-        # Initially False.
-        # Fake-job validation can update this later.
         "is_fake":
             False,
 
@@ -4610,7 +4604,150 @@ def extract_job_data(
             score,
     }
 
-    return job_data
+def extract_generic_job(
+    source_html,
+    normalized_text,
+):
+
+    result = empty_extracted_job()
+
+    jobposting = (
+        extract_jobposting_json_ld(
+            source_html
+        )
+    )
+
+    if not jobposting:
+
+        return result
+
+    # =====================================================
+    # TITLE
+    # =====================================================
+
+    result["job_title"] = (
+        jobposting.get(
+            "title",
+            "",
+        )
+        or ""
+    )
+
+    # =====================================================
+    # COMPANY
+    # =====================================================
+
+    organization = (
+        jobposting.get(
+            "hiringOrganization",
+            {},
+        )
+        or {}
+    )
+
+    result["company_name"] = (
+        organization.get(
+            "name",
+            "",
+        )
+        or ""
+    )
+
+    result["company_website"] = (
+        organization.get(
+            "sameAs",
+            "",
+        )
+        or organization.get(
+            "url",
+            "",
+        )
+        or ""
+    )
+
+    # =====================================================
+    # DESCRIPTION
+    # =====================================================
+
+    description_html = (
+        jobposting.get(
+            "description",
+            "",
+        )
+        or ""
+    )
+
+    result["job_description"] = (
+        html_to_clean_text(
+            description_html
+        )
+    )
+
+    # =====================================================
+    # DATES
+    # =====================================================
+
+    result["posted_date"] = (
+        normalize_source_date(
+            jobposting.get(
+                "datePosted",
+                "",
+            )
+        )
+    )
+
+    result["expiry_date"] = (
+        normalize_source_date(
+            jobposting.get(
+                "validThrough",
+                "",
+            )
+        )
+    )
+
+    # =====================================================
+    # URL
+    # =====================================================
+
+    result["source_url"] = (
+        jobposting.get(
+            "url",
+            "",
+        )
+        or ""
+    )
+
+    # =====================================================
+    # CATEGORY
+    # =====================================================
+
+    result["job_category"] = (
+        detect_job_category(
+            result["job_title"],
+            result["job_description"],
+        )
+    )
+
+    # =====================================================
+    # SKILLS FALLBACK
+    # =====================================================
+
+    result["skills_required"] = (
+        extract_skills(
+            result[
+                "job_description"
+            ]
+        )
+    )
+
+    result["job_details_text"] = (
+        result[
+            "job_description"
+        ]
+    )
+
+    return result
+
 
 # ============================================================
 # CREATE EXCEL
