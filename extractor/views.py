@@ -1011,7 +1011,13 @@ def detect_source_platform(
                 "indeed.com",
             ],
         ),
-
+        (
+            "Cutshort",
+            [
+                "cutshort.io/job/",
+                "cutshort.io/job",
+            ],
+        ),
         (
             "LinkedIn",
             [
@@ -1109,7 +1115,12 @@ def detect_source_platform(
             "jdright_jdbodyright__",
             "staticcand.shine.com",
         ],
-
+        "Cutshort": [
+            "sc-8f06d440-0",
+            "jdluxx",
+            "cutshort.io/job/",
+            "cdn.cutshort.io",
+        ],
         "LinkedIn": [
             "jobs-details__main-content",
             "job-details-jobs-unified-top-card",
@@ -1200,6 +1211,11 @@ def detect_source_platform(
 
     if "jdleft_jdbodyleft__" in html_lower:
         return "Shine"
+    if (
+        "sc-8f06d440-0" in html_lower
+        and "cutshort.io" in html_lower
+    ):
+        return "Cutshort"
 
     return "Other"
 
@@ -1635,6 +1651,7 @@ def determine_source_type(
         "LinkedIn",
         "Indeed",
         "Naukri",
+        "Cutshort",
     }
 
     ats_sources = {
@@ -3790,6 +3807,1136 @@ def html_to_clean_text(
     return text.strip()
 
 # ============================================================
+# CUTSHORT SELECTED JOB DETAILS
+# ============================================================
+
+def isolate_cutshort_job_details_text(
+    source_html,
+):
+    """
+    Cutshort selected-job boundary.
+
+    START:
+
+    <div class="sc-8f06d440-0 jdlUxX">
+
+    END:
+
+    First occurrence AFTER the start of:
+
+    <div class="
+        sc-89b45c2f-0
+        sc-89b45c2f-1
+        cCGhbz
+        fERRrh
+    ">
+
+    Returns clean plain text, not HTML.
+    """
+
+    if not source_html:
+        return ""
+
+    # =====================================================
+    # START TAG
+    # =====================================================
+
+    start_pattern = re.compile(
+        r"""
+        <div\b
+        [^>]*
+        class=["']
+        [^"']*
+        \bsc-8f06d440-0\b
+        [^"']*
+        \bjdlUxX\b
+        [^"']*
+        ["']
+        [^>]*
+        >
+        """,
+        flags=(
+            re.IGNORECASE
+            | re.VERBOSE
+        ),
+    )
+
+    start_match = (
+        start_pattern.search(
+            source_html
+        )
+    )
+
+    if not start_match:
+        return ""
+
+    # =====================================================
+    # END TAG
+    #
+    # IMPORTANT:
+    # search starts AFTER the selected start tag.
+    #
+    # Therefore this is the FIRST matching end tag
+    # belonging to the main selected-job area.
+    # =====================================================
+
+    end_pattern = re.compile(
+        r"""
+        <div\b
+        [^>]*
+        class=["']
+        [^"']*
+        \bsc-89b45c2f-0\b
+        [^"']*
+        \bsc-89b45c2f-1\b
+        [^"']*
+        \bcCGhbz\b
+        [^"']*
+        \bfERRrh\b
+        [^"']*
+        ["']
+        [^>]*
+        >
+        """,
+        flags=(
+            re.IGNORECASE
+            | re.VERBOSE
+        ),
+    )
+
+    end_match = end_pattern.search(
+        source_html,
+        start_match.end(),
+    )
+
+    if end_match:
+
+        selected_html = source_html[
+            start_match.start():
+            end_match.start()
+        ]
+
+    else:
+
+        # Fallback:
+        # if Cutshort changes/removes the end marker,
+        # continue from start instead of crashing.
+
+        selected_html = source_html[
+            start_match.start():
+        ]
+
+    # =====================================================
+    # HTML -> CLEAN TEXT
+    # =====================================================
+
+    return html_to_clean_text(
+        selected_html
+    )
+
+# ============================================================
+# CUTSHORT NEXT.JS DATA
+# ============================================================
+
+def extract_cutshort_next_data(
+    source_html,
+):
+
+    if not source_html:
+        return {}
+
+    soup = BeautifulSoup(
+        source_html,
+        "html.parser",
+    )
+
+    script = soup.find(
+        "script",
+        id="__NEXT_DATA__",
+    )
+
+    if not script:
+        return {}
+
+    raw_json = (
+        script.string
+        or script.get_text()
+    )
+
+    if not raw_json:
+        return {}
+
+    try:
+
+        return json.loads(
+            raw_json
+        )
+
+    except (
+        json.JSONDecodeError,
+        TypeError,
+    ):
+
+        return {}
+
+# ============================================================
+# CUTSHORT SELECTED PAGE DATA
+# ============================================================
+
+def extract_cutshort_page_data(
+    source_html,
+):
+
+    next_data = (
+        extract_cutshort_next_data(
+            source_html
+        )
+    )
+
+    if not next_data:
+        return {}
+
+    queries = (
+        next_data
+        .get(
+            "props",
+            {},
+        )
+        .get(
+            "pageProps",
+            {},
+        )
+        .get(
+            "dehydratedState",
+            {},
+        )
+        .get(
+            "queries",
+            [],
+        )
+        or []
+    )
+
+    # Search every query instead of assuming
+    # the selected job is always query number 0.
+
+    for query in queries:
+
+        data = (
+            query
+            .get(
+                "state",
+                {},
+            )
+            .get(
+                "data",
+                {},
+            )
+            .get(
+                "data",
+                {},
+            )
+            or {}
+        )
+
+        page_data = (
+            data.get(
+                "pageData"
+            )
+        )
+
+        if (
+            isinstance(
+                page_data,
+                dict,
+            )
+            and (
+                page_data.get(
+                    "_id"
+                )
+                or page_data.get(
+                    "headline"
+                )
+            )
+        ):
+
+            return page_data
+
+    return {}
+
+# ============================================================
+# CUTSHORT EMPLOYMENT TYPE
+# ============================================================
+
+def normalize_cutshort_employment_type(
+    values,
+):
+
+    allowed_types = {
+        "full_time": "Full-time",
+        "full-time": "Full-time",
+        "full time": "Full-time",
+
+        "part_time": "Part-time",
+        "part-time": "Part-time",
+        "part time": "Part-time",
+
+        "internship": "Internship",
+
+        "contract": "Contract",
+
+        "temporary": "Temporary",
+
+        "freelance": "Freelance",
+
+        "permanent": "Permanent",
+    }
+
+    if not values:
+        return ""
+
+    if not isinstance(
+        values,
+        list,
+    ):
+        values = [values]
+
+    found_types = []
+
+    for value in values:
+
+        key = (
+            str(value)
+            .strip()
+            .lower()
+        )
+
+        employment_type = (
+            allowed_types.get(
+                key,
+                "",
+            )
+        )
+
+        if (
+            employment_type
+            and employment_type
+            not in found_types
+        ):
+
+            found_types.append(
+                employment_type
+            )
+
+    return ", ".join(
+        found_types
+    )
+
+# ============================================================
+# CUTSHORT CITY / STATE / COUNTRY
+# ============================================================
+
+def parse_cutshort_location(
+    location,
+    job_description,
+    remote_type,
+):
+
+    city = ""
+    state = ""
+    country = ""
+
+    # =====================================================
+    # LOOK FOR DESCRIPTION LOCATION
+    #
+    # Example:
+    #
+    # Location
+    # : Pune Remote
+    # =====================================================
+
+    location_match = re.search(
+        r"""
+        \bLocation
+        \s*
+        :?
+        \s*
+        ([^\n]+)
+        """,
+        job_description,
+        flags=(
+            re.IGNORECASE
+            | re.VERBOSE
+        ),
+    )
+
+    if location_match:
+
+        description_location = (
+            location_match.group(1)
+            .strip()
+        )
+
+        description_location = re.sub(
+            r"\b"
+            r"(Remote|Hybrid|Onsite|On-site)"
+            r"\b",
+            "",
+            description_location,
+            flags=re.IGNORECASE,
+        ).strip(
+            " ,-"
+        )
+
+        if description_location:
+
+            parts = [
+                part.strip()
+                for part
+                in description_location.split(",")
+                if part.strip()
+            ]
+
+            if len(parts) >= 2:
+
+                city = ", ".join(
+                    parts[:-1]
+                )
+
+                state = parts[-1]
+
+            elif len(parts) == 1:
+
+                city = parts[0]
+
+    # =====================================================
+    # FALLBACK TO MAIN CUTSHORT LOCATION
+    # =====================================================
+
+    if (
+        not city
+        and location
+        and remote_type != "Remote"
+    ):
+
+        parts = [
+            part.strip()
+            for part
+            in location.split(",")
+            if part.strip()
+        ]
+
+        if len(parts) >= 2:
+
+            city = ", ".join(
+                parts[:-1]
+            )
+
+            state = parts[-1]
+
+        elif len(parts) == 1:
+
+            city = parts[0]
+
+    return (
+        city,
+        state,
+        country,
+    )
+
+# ============================================================
+# CUTSHORT VIEW-SOURCE EXTRACTOR
+# ============================================================
+
+def extract_cutshort_source_job(
+    source_html,
+):
+
+    # =====================================================
+    # 1. SELECTED JOB TEXT USING YOUR EXACT BOUNDARY
+    # =====================================================
+
+    job_details_text = (
+        isolate_cutshort_job_details_text(
+            source_html
+        )
+    )
+
+    # =====================================================
+    # 2. CUTSHORT INTERNAL PAGE DATA
+    # =====================================================
+
+    page_data = (
+        extract_cutshort_page_data(
+            source_html
+        )
+    )
+
+    # =====================================================
+    # 3. GENERIC SCHEMA.ORG JOBPOSTING
+    #
+    # Reuse existing common function.
+    # =====================================================
+
+    jobposting = (
+        extract_jobposting_json_ld(
+            source_html
+        )
+    )
+
+    if (
+        not job_details_text
+        and not page_data
+        and not jobposting
+    ):
+
+        return {}
+
+    # =====================================================
+    # JOB KEY
+    # =====================================================
+
+    identifier = (
+        jobposting.get(
+            "identifier",
+            {},
+        )
+        or {}
+    )
+
+    job_key = str(
+        page_data.get(
+            "_id"
+        )
+        or identifier.get(
+            "value"
+        )
+        or ""
+    )
+
+    # =====================================================
+    # JOB TITLE
+    # =====================================================
+
+    job_title = (
+        page_data.get(
+            "headline"
+        )
+        or jobposting.get(
+            "title"
+        )
+        or ""
+    )
+
+    # JSON-LD can contain:
+    #
+    # MERN Stack Engineer (SDE-2) (Remote)
+    #
+    # Remote already has its own Excel column.
+
+    job_title = re.sub(
+        r"\s*\(Remote\)\s*$",
+        "",
+        job_title,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # =====================================================
+    # COMPANY NAME
+    # =====================================================
+
+    company_id = (
+        page_data.get(
+            "companyId",
+            {},
+        )
+        or {}
+    )
+
+    organization = (
+        jobposting.get(
+            "hiringOrganization",
+            {},
+        )
+        or {}
+    )
+
+    company_name = (
+        company_id.get(
+            "name"
+        )
+        or organization.get(
+            "name"
+        )
+        or ""
+    )
+
+    # =====================================================
+    # COMPANY WEBSITE
+    # =====================================================
+
+    company_website = ""
+
+    company_details = (
+        page_data.get(
+            "companyDetails",
+            {},
+        )
+        or {}
+    )
+
+    links = (
+        company_details.get(
+            "links"
+        )
+        or (
+            company_details.get(
+                "company",
+                {},
+            )
+            or {}
+        ).get(
+            "links"
+        )
+        or {}
+    )
+
+    if isinstance(
+        links,
+        dict,
+    ):
+
+        company_website = (
+            links.get(
+                "website",
+                "",
+            )
+            or ""
+        )
+
+    # =====================================================
+    # JOB DESCRIPTION
+    # =====================================================
+
+    description_html = (
+        page_data.get(
+            "sanitizedComment"
+        )
+        or jobposting.get(
+            "description"
+        )
+        or ""
+    )
+
+    job_description = (
+        html_to_clean_text(
+            unescape(
+                description_html
+            )
+        )
+    )
+
+    # =====================================================
+    # SKILLS
+    # =====================================================
+
+    raw_skills = (
+        page_data.get(
+            "allSkills"
+        )
+        or jobposting.get(
+            "skills"
+        )
+        or []
+    )
+
+    if isinstance(
+        raw_skills,
+        str,
+    ):
+
+        raw_skills = re.split(
+            r"[,;]+",
+            raw_skills,
+        )
+
+    skills_list = []
+
+    for skill in raw_skills:
+
+        skill = str(
+            skill
+        ).strip()
+
+        if (
+            skill
+            and skill not in skills_list
+        ):
+
+            skills_list.append(
+                skill
+            )
+
+    skills = "; ".join(
+        skills_list
+    )
+
+    if not skills:
+
+        skills = extract_skills(
+            job_description
+        )
+
+    # =====================================================
+    # EXPERIENCE
+    # =====================================================
+
+    exp_range = (
+        page_data.get(
+            "expRange",
+            {},
+        )
+        or {}
+    )
+
+    experience_min = (
+        exp_range.get(
+            "minVanity"
+        )
+    )
+
+    if experience_min in {
+        "",
+        None,
+    }:
+
+        experience_min = (
+            exp_range.get(
+                "min",
+                "",
+            )
+        )
+
+    experience_max = (
+        exp_range.get(
+            "maxVanity"
+        )
+    )
+
+    if experience_max in {
+        "",
+        None,
+    }:
+
+        experience_max = (
+            exp_range.get(
+                "max",
+                "",
+            )
+        )
+
+    experience_required = ""
+
+    if (
+        experience_min not in {
+            "",
+            None,
+        }
+        and experience_max not in {
+            "",
+            None,
+        }
+    ):
+
+        experience_required = (
+            f"{experience_min} "
+            f"to {experience_max} Years"
+        )
+
+    # Fallback to selected job text.
+    if not experience_required:
+
+        (
+            experience_required,
+            experience_min,
+            experience_max,
+        ) = extract_experience(
+            job_details_text
+        )
+
+    # =====================================================
+    # SALARY
+    # =====================================================
+
+    salary_min = ""
+    salary_max = ""
+    salary_currency = ""
+
+    base_salary = (
+        jobposting.get(
+            "baseSalary",
+            {},
+        )
+        or {}
+    )
+
+    salary_currency = (
+        base_salary.get(
+            "currency",
+            "",
+        )
+        or ""
+    )
+
+    salary_value = (
+        base_salary.get(
+            "value",
+            {},
+        )
+        or {}
+    )
+
+    salary_min = (
+        salary_value.get(
+            "minValue",
+            "",
+        )
+    )
+
+    salary_max = (
+        salary_value.get(
+            "maxValue",
+            "",
+        )
+    )
+
+    salary_unit = (
+        salary_value.get(
+            "unitText",
+            "",
+        )
+        or ""
+    ).upper()
+
+    # Monthly -> annual normalization.
+
+    if salary_unit in {
+        "MONTH",
+        "MONTHLY",
+    }:
+
+        if salary_min not in {
+            "",
+            None,
+        }:
+
+            salary_min = (
+                float(salary_min)
+                * 12
+            )
+
+        if salary_max not in {
+            "",
+            None,
+        }:
+
+            salary_max = (
+                float(salary_max)
+                * 12
+            )
+
+    try:
+
+        salary_min = int(
+            float(
+                salary_min
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        salary_min = ""
+
+    try:
+
+        salary_max = int(
+            float(
+                salary_max
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        salary_max = ""
+
+    # =====================================================
+    # LOCATION / REMOTE TYPE
+    # =====================================================
+
+    location = str(
+        page_data.get(
+            "locations",
+            "",
+        )
+        or ""
+    ).strip()
+
+    remote_value = str(
+        page_data.get(
+            "remoteType",
+            "",
+        )
+        or ""
+    ).lower()
+
+    job_location_type = str(
+        jobposting.get(
+            "jobLocationType",
+            "",
+        )
+        or ""
+    ).upper()
+
+    remote_type = ""
+
+    if (
+        "remote" in remote_value
+        or job_location_type
+        == "TELECOMMUTE"
+        or "remote only"
+        in location.lower()
+    ):
+
+        remote_type = "Remote"
+
+    elif "hybrid" in remote_value:
+
+        remote_type = "Hybrid"
+
+    elif location:
+
+        remote_type = "Onsite"
+
+    (
+        city,
+        state,
+        country,
+    ) = parse_cutshort_location(
+        location,
+        job_description,
+        remote_type,
+    )
+
+    # =====================================================
+    # EMPLOYMENT TYPE
+    # =====================================================
+
+    employment_type = (
+        normalize_cutshort_employment_type(
+            page_data.get(
+                "roleTypes"
+            )
+            or jobposting.get(
+                "employmentType"
+            )
+        )
+    )
+
+    # =====================================================
+    # CATEGORY
+    # =====================================================
+
+    category = detect_job_category(
+        job_title,
+        job_description,
+    )
+
+    # Cutshort itself categorizes this as tech.
+    if not category:
+
+        tag_category = (
+            page_data
+            .get(
+                "matchPreferences",
+                {},
+            )
+            .get(
+                "tagCategory",
+                "",
+            )
+        )
+
+        if (
+            str(tag_category)
+            .lower()
+            == "tech"
+        ):
+
+            category = "IT"
+
+    # =====================================================
+    # POSTED / EXPIRY
+    # =====================================================
+
+    posted_date = (
+        normalize_source_date(
+            jobposting.get(
+                "datePosted",
+                "",
+            )
+        )
+    )
+
+    expiry_date = (
+        normalize_source_date(
+            jobposting.get(
+                "validThrough",
+                "",
+            )
+        )
+    )
+
+    # =====================================================
+    # SOURCE URL
+    # =====================================================
+
+    extracted_source_url = (
+        page_data.get(
+            "publicUrl",
+            "",
+        )
+        or ""
+    )
+
+    if not extracted_source_url:
+
+        soup = BeautifulSoup(
+            source_html,
+            "html.parser",
+        )
+
+        canonical = soup.find(
+            "link",
+            rel="canonical",
+        )
+
+        if canonical:
+
+            extracted_source_url = (
+                canonical.get(
+                    "href",
+                    "",
+                )
+                or ""
+            )
+
+    # =====================================================
+    # APPLY URL
+    # =====================================================
+
+    apply_url = ""
+
+    if (
+        jobposting.get(
+            "directApply"
+        )
+        and extracted_source_url
+    ):
+
+        apply_url = (
+            extracted_source_url
+        )
+
+    # =====================================================
+    # RETURN COMMON NORMALIZED FORMAT
+    # =====================================================
+
+    return {
+
+        "job_key":
+            job_key,
+
+        "job_title":
+            job_title,
+
+        "company_name":
+            company_name,
+
+        "company_website":
+            company_website,
+
+        "job_description":
+            job_description,
+
+        "skills_required":
+            skills,
+
+        "experience_required":
+            experience_required,
+
+        "experience_min_years":
+            experience_min,
+
+        "experience_max_years":
+            experience_max,
+
+        "salary_min":
+            salary_min,
+
+        "salary_max":
+            salary_max,
+
+        "salary_currency":
+            salary_currency,
+
+        "location":
+            location,
+
+        "city":
+            city,
+
+        "state":
+            state,
+
+        "country":
+            country,
+
+        "remote_type":
+            remote_type,
+
+        "employment_type":
+            employment_type,
+
+        "job_category":
+            category,
+
+        "posted_date":
+            posted_date,
+
+        "expiry_date":
+            expiry_date,
+
+        "application_deadline":
+            "",
+
+        "apply_url":
+            apply_url,
+
+        "source_url":
+            extracted_source_url,
+
+        "job_details_text":
+            job_details_text,
+    }
+
+
+# ============================================================
 # PORTAL PARSER DISPATCHER
 # ============================================================
 
@@ -3835,6 +4982,22 @@ def extract_portal_job(
                 source_html
             )
         )
+    # =====================================================
+    # CUTSHORT
+    # =====================================================
+    if source_platform == "Cutshort":
+        cutshort_data = (
+            extract_cutshort_source_job(
+                source_html
+            )
+        )
+        if not cutshort_data:
+            raise ValueError(
+                "Cutshort selected job data "
+                "could not be extracted."
+            )
+
+        return cutshort_data
 
     # =====================================================
     # LINKEDIN
