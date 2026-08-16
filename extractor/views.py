@@ -967,57 +967,105 @@ def extract_company_website(text):
 # ============================================================
 # SOURCE PLATFORM
 # ============================================================
+
 def detect_source_platform(
     text,
     source_url,
 ):
+    """
+    Detect the actual job portal.
 
-    combined = (
-        f"{text} {source_url}"
+    IMPORTANT:
+    Prefer strong page-specific markers instead of
+    generic social-media URLs inside page HTML.
+    """
+
+    source_url_lower = (
+        source_url or ""
     ).lower()
 
-    # LinkedIn
-    if (
-        "linkedin.com" in combined
-        or "linkedin corporation" in combined
-        or "responses managed off linkedin" in combined
-        or "get job alerts for this search" in combined
-    ):
+    lower = (
+        text or ""
+    ).lower()
+
+    # =====================================================
+    # 1. SOURCE URL IS STRONGEST
+    # =====================================================
+
+    if "shine.com" in source_url_lower:
+        return "Shine"
+
+    if "indeed.com" in source_url_lower:
+        return "Indeed"
+
+    if "linkedin.com" in source_url_lower:
         return "LinkedIn"
 
-    # Shine
+    if "naukri.com" in source_url_lower:
+        return "Naukri"
+
+    if "greenhouse" in source_url_lower:
+        return "Greenhouse"
+
+    if "lever.co" in source_url_lower:
+        return "Lever"
+
+    # =====================================================
+    # 2. SHINE PAGE-SPECIFIC MARKERS
+    # =====================================================
+    #
+    # Do this BEFORE LinkedIn because Shine footer/source
+    # can contain LinkedIn social-media URLs.
+    # =====================================================
+
     if (
-        "shine.com" in combined
-        or "shine logo" in combined
+        "jdleft_jdbodyleft__" in lower
+        or "jdleft_jdleft__" in lower
+        or "jdright_jdbodyright__" in lower
+        or "staticcand.shine.com" in lower
+        or (
+            "__next_data__" in lower
+            and "shine.com" in lower
+        )
     ):
         return "Shine"
 
-    # Indeed
+    # =====================================================
+    # 3. INDEED
+    # =====================================================
+
     if (
-        "indeed.com" in combined
-        or "job post details" in combined
-        or "full job description" in combined
-        and "return to search result" in combined
+        'id="job-full-details"' in lower
+        or "jobsearch-viewjobcontainerwrapper" in lower
+        or "indeed.com/viewjob" in lower
     ):
         return "Indeed"
 
-    # Naukri
+    # =====================================================
+    # 4. LINKEDIN
+    # =====================================================
+
     if (
-        "naukri.com" in combined
-        or "naukri" in combined
+        "get job alerts for this search" in lower
+        or "responses managed off linkedin" in lower
+        or "linkedin corporation" in lower
     ):
+        return "LinkedIn"
+
+    # =====================================================
+    # 5. OTHER SOURCES
+    # =====================================================
+
+    if "naukri.com" in lower:
         return "Naukri"
 
-    # Greenhouse
-    if "greenhouse" in combined:
+    if "greenhouse" in lower:
         return "Greenhouse"
 
-    # Lever
-    if "lever.co" in combined:
+    if "lever.co" in lower:
         return "Lever"
 
     return "Other"
-
 
 # ============================================================
 # SOURCE TYPE
@@ -2721,6 +2769,20 @@ def extract_shine_source_job(
 ):
 
     # =====================================================
+    # VISIBLE SELECTED-JOB TEXT
+    # =====================================================
+
+    shine_job_text = (
+        isolate_shine_job_details_text(
+            source_html
+        )
+    )
+
+    if not shine_job_text:
+
+        return {}
+
+    # =====================================================
     # 1. JOBPOSTING JSON-LD
     # =====================================================
 
@@ -2826,40 +2888,63 @@ def extract_shine_source_job(
     # =====================================================
     # 6. DESCRIPTION
     # =====================================================
-
-    description_html = (
-        jobposting.get(
-            "description",
-            "",
-        )
-        or shine_job.get(
-            "jJD",
-            "",
-        )
-        or ""
-    )
-
-    description_html = unescape(
-        description_html
-    )
-
-    description_soup = BeautifulSoup(
-        description_html,
-        "html.parser",
-    )
+    # =====================================================
+    # JOB DESCRIPTION
+    #
+    # PRIMARY:
+    # visible selected-job section converted to text
+    #
+    # FALLBACK:
+    # JSON-LD description
+    # =====================================================
 
     job_description = (
-        description_soup.get_text(
-            "\n",
-            strip=True,
+        extract_shine_job_description_from_text(
+            shine_job_text
         )
     )
+
+    # =====================================================
+    # FALLBACK TO STRUCTURED DESCRIPTION
+    # =====================================================
+
+    if not job_description:
+
+        description_html = (
+            jobposting.get(
+                "description",
+                "",
+            )
+            or shine_job.get(
+                "jJD",
+                "",
+            )
+            or ""
+        )
+
+        if description_html:
+
+            description_soup = (
+                BeautifulSoup(
+                    description_html,
+                    "html.parser",
+                )
+            )
+
+            job_description = (
+                description_soup.get_text(
+                    "\n",
+                    strip=True,
+                )
+            )
 
     job_description = re.sub(
         r"\n{3,}",
         "\n\n",
         job_description,
-    ).strip()
+    ).strip()    
+
+
 
     # =====================================================
     # 7. SKILLS
@@ -3262,8 +3347,192 @@ def extract_shine_source_job(
 
         "source_url":
             extracted_source_url,
+
+        "job_details_text":
+            shine_job_text,
     }
 
+# ============================================================
+# ISOLATE SHINE SELECTED JOB AS PLAIN TEXT
+# ============================================================
+
+def isolate_shine_job_details_text(
+    source_html,
+):
+    """
+    Extract only the selected Shine job left-side content.
+
+    Start area looks like:
+
+    <div class="jdLeft_jdBodyLeft__KdoJ4">
+        <div class="jdLeft_jdLeft__GZjqp">
+            ...
+        </div>
+    </div>
+
+    The right side:
+
+    <aside class="jdRight_jdBodyRight__qTz6e">
+
+    contains Similar Jobs and must NOT be included.
+
+    Returns PLAIN TEXT, not HTML.
+    """
+
+    if not source_html:
+        return ""
+
+    soup = BeautifulSoup(
+        source_html,
+        "html.parser",
+    )
+
+    # =====================================================
+    # FIND OUTER LEFT JOB CONTAINER
+    # =====================================================
+    #
+    # Do not use the complete class:
+    #
+    # jdLeft_jdBodyLeft__KdoJ4
+    #
+    # because KdoJ4 may change.
+    #
+    # Match only stable prefix:
+    #
+    # jdLeft_jdBodyLeft__
+    # =====================================================
+
+    outer_left = soup.find(
+        lambda tag:
+            tag.name == "div"
+            and any(
+                class_name.startswith(
+                    "jdLeft_jdBodyLeft__"
+                )
+                for class_name
+                in tag.get(
+                    "class",
+                    [],
+                )
+            )
+    )
+
+    if not outer_left:
+        return ""
+
+    # =====================================================
+    # FIND INNER LEFT JOB DETAILS
+    # =====================================================
+
+    inner_left = outer_left.find(
+        lambda tag:
+            tag.name == "div"
+            and any(
+                class_name.startswith(
+                    "jdLeft_jdLeft__"
+                )
+                for class_name
+                in tag.get(
+                    "class",
+                    [],
+                )
+            )
+    )
+
+    # Prefer inner container when available.
+    job_container = (
+        inner_left
+        or outer_left
+    )
+
+    # =====================================================
+    # REMOVE NON-VISIBLE / USELESS ELEMENTS
+    # =====================================================
+
+    for unwanted in job_container.find_all(
+        [
+            "script",
+            "style",
+            "noscript",
+            "svg",
+        ]
+    ):
+
+        unwanted.decompose()
+
+    # =====================================================
+    # HTML -> PLAIN TEXT
+    # =====================================================
+
+    job_text = (
+        job_container.get_text(
+            "\n",
+            strip=True,
+        )
+    )
+
+    job_text = (
+        job_text
+        .replace(
+            "\xa0",
+            " ",
+        )
+    )
+
+    # Remove excessive empty lines.
+    job_text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        job_text,
+    )
+
+    return job_text.strip()
+
+
+# ============================================================
+# SHINE JOB DESCRIPTION FROM LEFT-SIDE TEXT
+# ============================================================
+
+def extract_shine_job_description_from_text(
+    shine_job_text,
+):
+    """
+    Extract plain-text description from the Shine
+    selected-job left panel.
+
+    Start:
+        JOB DESCRIPTION
+
+    Stop before:
+        Other Details
+        Recruiter Details
+        Company Details
+        About Recruiter
+        About Company
+    """
+
+    if not shine_job_text:
+        return ""
+
+    description = extract_section(
+        shine_job_text,
+        "JOB DESCRIPTION",
+        [
+            "Other Details",
+            "Recruiter Details",
+            "Company Details",
+            "About Recruiter",
+            "About Company",
+        ],
+    )
+
+    description = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        description,
+    )
+
+    return description.strip()
 # ============================================================
 # MAIN EXTRACTION
 # ============================================================
@@ -3579,8 +3848,13 @@ def extract_job_data(
                 "job_description",
                 "",
             )
-            or source_html
+            or shine_data.get(
+                "job_description",
+                "",
+            )
         )
+        if not main_text:
+            main_text=""
 
         # -------------------------------------------------
         # TITLE
