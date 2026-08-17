@@ -5,6 +5,7 @@ import hashlib
 import re
 import calendar
 import re
+from .mylib import infer_country_from_location
 
 import json
 from html import unescape
@@ -5537,6 +5538,12 @@ def extract_job_data(
     country = extracted.get(
         "country",
         "",
+    )
+
+    country = infer_country_from_location(
+        location=location,
+        state=state,
+        existing_country=country,
     )
 
     remote_type = extracted.get(
