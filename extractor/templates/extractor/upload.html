@@ -209,6 +209,72 @@
             cursor: not-allowed;
         }
 
+.job-upload-section {
+    margin-bottom: 25px;
+    padding: 20px;
+
+    border: 1px solid #bbf7d0;
+    border-radius: 14px;
+
+    background: #f0fdf4;
+
+    text-align: center;
+}
+
+
+.job-upload-section p {
+    margin: 0 0 15px;
+
+    color: #166534;
+
+    line-height: 1.6;
+}
+
+
+.job-upload-button {
+    background: #15803d;
+
+    color: white;
+
+    border: none;
+    border-radius: 10px;
+
+    padding: 14px 30px;
+
+    font-size: 16px;
+    font-weight: bold;
+
+    cursor: pointer;
+}
+
+
+.job-upload-button:hover {
+    background: #166534;
+}
+
+
+.job-upload-button:disabled {
+    opacity: 0.6;
+
+    cursor: not-allowed;
+}
+
+
+.scan-error {
+    margin-bottom: 20px;
+
+    padding: 14px;
+
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+
+    background: #fef2f2;
+
+    color: #b91c1c;
+
+    line-height: 1.5;
+}
+
 
         .columns-info {
             margin-top: 30px;
@@ -327,6 +393,60 @@
 
             </div>
 
+ {% if scan_error %}
+
+    <div class="scan-error">
+
+        {{ scan_error }}
+
+    </div>
+
+{% endif %}
+
+
+<div class="job-upload-section">
+
+    <p>
+
+        Scan the Downloads folder for
+        saved job View Source HTML files.
+
+        An Excel file will be generated
+        containing the file name,
+        file size and detected job portal.
+
+    </p>
+
+
+    <form
+        method="post"
+        id="job-upload-form"
+    >
+
+        {% csrf_token %}
+
+
+        <input
+            type="hidden"
+            name="action"
+            value="scan_downloads"
+        >
+
+
+        <button
+            type="submit"
+            class="job-upload-button"
+            id="job-upload-button"
+        >
+
+            Job Upload
+
+        </button>
+
+
+    </form>
+
+</div>
 
             <form
                 method="post"
@@ -335,6 +455,11 @@
             >
 
                 {% csrf_token %}
+<input
+    type="hidden"
+    name="action"
+    value="extract_job"
+> 
 
 
                 <div class="upload-box">
@@ -351,6 +476,7 @@
 
 
                     {{ form.text_file }}
+
 
 
                     <div class="help-text">
@@ -468,6 +594,46 @@
 
         }
     );
+    const jobUploadForm =
+    document.getElementById(
+        "job-upload-form"
+    );
+
+
+const jobUploadButton =
+    document.getElementById(
+        "job-upload-button"
+    );
+
+
+jobUploadForm.addEventListener(
+    "submit",
+    function () {
+
+        jobUploadButton.disabled =
+            true;
+
+
+        jobUploadButton.textContent =
+            "Scanning Downloads...";
+
+
+        setTimeout(
+            function () {
+
+                jobUploadButton.disabled =
+                    false;
+
+
+                jobUploadButton.textContent =
+                    "Job Upload";
+
+            },
+            4000
+        );
+
+    }
+);
 
 </script>
 

@@ -6031,10 +6031,628 @@ def create_excel(job_data):
 
 
 # ============================================================
+# DOWNLOADED JOB HTML FILE INVENTORY
+# ============================================================
+
+JOB_FILE_SCAN_COLUMNS = [
+    "file_name",
+    "file_size_bytes",
+    "file_size",
+    "source_platform",
+]
+
+# ============================================================
+# VIEW-SOURCE FILE PORTAL MARKERS
+# ============================================================
+
+VIEW_SOURCE_PORTAL_FILENAME_MARKERS = [
+    (
+        "indeed.com",
+        "Indeed",
+    ),
+    (
+        "shine.com",
+        "Shine",
+    ),
+    (
+        "cutshort.io",
+        "Cutshort",
+    ),
+    (
+        "linkedin.com",
+        "LinkedIn",
+    ),
+    (
+        "naukri.com",
+        "Naukri",
+    ),
+    (
+        "foundit.in",
+        "Foundit",
+    ),
+    (
+        "glassdoor.com",
+        "Glassdoor",
+    ),
+    (
+        "glassdoor.co.in",
+        "Glassdoor",
+    ),
+    (
+        "internshala.com",
+        "Internshala",
+    ),
+    (
+        "timesjobs.com",
+        "TimesJobs",
+    ),
+    (
+        "freshersworld.com",
+        "Freshersworld",
+    ),
+]
+
+# ============================================================
+# FORMAT FILE SIZE
+# ============================================================
+
+def format_file_size(
+    size_bytes,
+):
+    """
+    Convert file size from bytes into a readable value.
+
+    Examples:
+
+    850
+    -> 850 B
+
+    2048
+    -> 2.00 KB
+
+    3145728
+    -> 3.00 MB
+    """
+
+    try:
+
+        size_bytes = int(
+            size_bytes
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        return ""
+
+    if size_bytes < 1024:
+
+        return (
+            f"{size_bytes} B"
+        )
+
+    size_kb = (
+        size_bytes
+        / 1024
+    )
+
+    if size_kb < 1024:
+
+        return (
+            f"{size_kb:.2f} KB"
+        )
+
+    size_mb = (
+        size_kb
+        / 1024
+    )
+
+    if size_mb < 1024:
+
+        return (
+            f"{size_mb:.2f} MB"
+        )
+
+    size_gb = (
+        size_mb
+        / 1024
+    )
+
+    return (
+        f"{size_gb:.2f} GB"
+    )
+
+# ============================================================
+# DETECT PORTAL FROM SAVED VIEW-SOURCE FILE
+# ============================================================
+
+def detect_saved_job_file_platform(
+    file_path,
+):
+    """
+    Detect which job portal a downloaded
+    View Source HTML file belongs to.
+
+    Priority:
+
+    1. Detect portal from filename.
+    2. If filename cannot identify it,
+       inspect the HTML using the existing
+       detect_source_platform() function.
+    """
+
+    file_path = Path(
+        file_path
+    )
+
+    filename_lower = (
+        file_path.name
+        .lower()
+    )
+
+    # =====================================================
+    # 1. FILENAME DETECTION
+    # =====================================================
+
+    for (
+        marker,
+        platform,
+    ) in VIEW_SOURCE_PORTAL_FILENAME_MARKERS:
+
+        if marker in filename_lower:
+
+            return platform
+
+    # =====================================================
+    # 2. HTML CONTENT FALLBACK
+    # =====================================================
+
+    try:
+
+        source_html = (
+            file_path.read_text(
+                encoding="utf-8",
+                errors="ignore",
+            )
+        )
+
+    except OSError:
+
+        return "Other"
+
+    source_platform = (
+        detect_source_platform(
+            source_html,
+            "",
+        )
+    )
+
+    return source_platform
+
+# ============================================================
+# SCAN DOWNLOADS FOR JOB VIEW-SOURCE HTML FILES
+# ============================================================
+
+def scan_downloads_for_job_html_files(
+    downloads_folder=None,
+):
+    """
+    Scan the Downloads folder for files such as:
+
+    view-source_https___in.indeed.com__....html
+
+    view-source_https___cutshort.io_job_....html
+
+    Only View Source HTML files are included.
+    """
+
+    # =====================================================
+    # DOWNLOADS DIRECTORY
+    # =====================================================
+
+    if downloads_folder is None:
+
+        downloads_path = (
+            Path.home()
+            / "Downloads"
+        )
+
+    else:
+
+        downloads_path = (
+            Path(
+                downloads_folder
+            )
+            .expanduser()
+        )
+
+    # =====================================================
+    # DIRECTORY CHECK
+    # =====================================================
+
+    if not downloads_path.exists():
+
+        return (
+            downloads_path,
+            [],
+        )
+
+    if not downloads_path.is_dir():
+
+        return (
+            downloads_path,
+            [],
+        )
+
+    file_rows = []
+
+    # =====================================================
+    # SCAN FILES
+    # =====================================================
+
+    for file_path in sorted(
+        downloads_path.iterdir(),
+        key=lambda item:
+            item.name.lower(),
+    ):
+
+        # Ignore folders.
+        if not file_path.is_file():
+
+            continue
+
+        filename_lower = (
+            file_path.name
+            .lower()
+        )
+
+        # =================================================
+        # MUST BE A VIEW-SOURCE FILE
+        # =================================================
+
+        if not filename_lower.startswith(
+            "view-source_"
+        ):
+
+            continue
+
+        # =================================================
+        # MUST BE HTML
+        # =================================================
+
+        if file_path.suffix.lower() not in {
+            ".html",
+            ".htm",
+        }:
+
+            continue
+
+        # =================================================
+        # FILE SIZE
+        # =================================================
+
+        try:
+
+            file_size_bytes = (
+                file_path
+                .stat()
+                .st_size
+            )
+
+        except OSError:
+
+            continue
+
+        # =================================================
+        # PORTAL
+        # =================================================
+
+        source_platform = (
+            detect_saved_job_file_platform(
+                file_path
+            )
+        )
+
+        # =================================================
+        # RESULT ROW
+        # =================================================
+
+        file_rows.append(
+            {
+                "file_name":
+                    file_path.name,
+
+                "file_size_bytes":
+                    file_size_bytes,
+
+                "file_size":
+                    format_file_size(
+                        file_size_bytes
+                    ),
+
+                "source_platform":
+                    source_platform,
+            }
+        )
+
+    return (
+        downloads_path,
+        file_rows,
+    )
+
+# ============================================================
+# CREATE JOB HTML FILE INVENTORY EXCEL
+# ============================================================
+
+def create_job_file_inventory_excel(
+    file_rows,
+):
+
+    workbook = Workbook()
+
+    worksheet = (
+        workbook.active
+    )
+
+    worksheet.title = (
+        "Job HTML Files"
+    )
+
+    # =====================================================
+    # HEADER STYLE
+    # =====================================================
+
+    header_fill = PatternFill(
+        fill_type="solid",
+        fgColor="1E3A8A",
+    )
+
+    header_font = Font(
+        bold=True,
+        color="FFFFFF",
+    )
+
+    # =====================================================
+    # HEADER
+    # =====================================================
+
+    for (
+        column_number,
+        column_name,
+    ) in enumerate(
+        JOB_FILE_SCAN_COLUMNS,
+        start=1,
+    ):
+
+        cell = worksheet.cell(
+            row=1,
+            column=column_number,
+            value=column_name,
+        )
+
+        cell.fill = (
+            header_fill
+        )
+
+        cell.font = (
+            header_font
+        )
+
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
+
+    # =====================================================
+    # FILE ROWS
+    # =====================================================
+
+    for (
+        row_number,
+        file_row,
+    ) in enumerate(
+        file_rows,
+        start=2,
+    ):
+
+        for (
+            column_number,
+            column_name,
+        ) in enumerate(
+            JOB_FILE_SCAN_COLUMNS,
+            start=1,
+        ):
+
+            cell = worksheet.cell(
+                row=row_number,
+                column=column_number,
+                value=file_row.get(
+                    column_name,
+                    "",
+                ),
+            )
+
+            cell.alignment = Alignment(
+                vertical="top",
+                wrap_text=True,
+            )
+
+    # =====================================================
+    # EXCEL SETTINGS
+    # =====================================================
+
+    worksheet.freeze_panes = (
+        "A2"
+    )
+
+    last_row = max(
+        len(file_rows) + 1,
+        1,
+    )
+
+    last_column = (
+        get_column_letter(
+            len(
+                JOB_FILE_SCAN_COLUMNS
+            )
+        )
+    )
+
+    worksheet.auto_filter.ref = (
+        f"A1:"
+        f"{last_column}"
+        f"{last_row}"
+    )
+
+    worksheet.column_dimensions[
+        "A"
+    ].width = 75
+
+    worksheet.column_dimensions[
+        "B"
+    ].width = 20
+
+    worksheet.column_dimensions[
+        "C"
+    ].width = 18
+
+    worksheet.column_dimensions[
+        "D"
+    ].width = 22
+
+    worksheet.row_dimensions[
+        1
+    ].height = 30
+
+    # =====================================================
+    # SAVE
+    # =====================================================
+
+    output = BytesIO()
+
+    workbook.save(
+        output
+    )
+
+    output.seek(0)
+
+    return output
+
+# ============================================================
 # DJANGO VIEW
 # ============================================================
 
-def upload_job_text(request):
+def upload_job_text(
+    request,
+):
+
+    # =====================================================
+    # JOB UPLOAD BUTTON
+    #
+    # Scan Downloads folder and create
+    # an inventory Excel.
+    # =====================================================
+
+    if (
+        request.method == "POST"
+        and request.POST.get(
+            "action"
+        ) == "scan_downloads"
+    ):
+
+        (
+            downloads_path,
+            file_rows,
+        ) = (
+            scan_downloads_for_job_html_files()
+        )
+
+        # =================================================
+        # DOWNLOADS FOLDER NOT FOUND
+        # =================================================
+
+        if not downloads_path.exists():
+
+            form = (
+                JobTextUploadForm()
+            )
+
+            return render(
+                request,
+                "extractor/upload.html",
+                {
+                    "form":
+                        form,
+
+                    "scan_error":
+                        (
+                            "Downloads folder was not "
+                            "found on the machine "
+                            "running Django."
+                        ),
+                },
+            )
+
+        # =================================================
+        # NO VIEW-SOURCE HTML FILES
+        # =================================================
+
+        if not file_rows:
+
+            form = (
+                JobTextUploadForm()
+            )
+
+            return render(
+                request,
+                "extractor/upload.html",
+                {
+                    "form":
+                        form,
+
+                    "scan_error":
+                        (
+                            "No view-source_*.html "
+                            "job files were found "
+                            "in the Downloads folder."
+                        ),
+                },
+            )
+
+        # =================================================
+        # CREATE INVENTORY EXCEL
+        # =================================================
+
+        excel_file = (
+            create_job_file_inventory_excel(
+                file_rows
+            )
+        )
+
+        response = HttpResponse(
+            excel_file.getvalue(),
+            content_type=(
+                "application/vnd."
+                "openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+        )
+
+        response[
+            "Content-Disposition"
+        ] = (
+            'attachment; '
+            'filename="job_html_files.xlsx"'
+        )
+
+        return response
+
+    # =====================================================
+    # EXISTING JOB EXTRACTION
+    # =====================================================
 
     if request.method == "POST":
 
@@ -6064,13 +6682,17 @@ def upload_job_text(request):
                 )
             )
 
-            job_data = extract_job_data(
-                raw_text,
-                source_url,
+            job_data = (
+                extract_job_data(
+                    raw_text,
+                    source_url,
+                )
             )
 
-            excel_file = create_excel(
-                job_data
+            excel_file = (
+                create_excel(
+                    job_data
+                )
             )
 
             job_title = (
@@ -6083,7 +6705,9 @@ def upload_job_text(request):
             )
 
             safe_name = (
-                slugify(job_title)
+                slugify(
+                    job_title
+                )
                 or "job"
             )
 
@@ -6112,12 +6736,17 @@ def upload_job_text(request):
 
     else:
 
-        form = JobTextUploadForm()
+        form = (
+            JobTextUploadForm()
+        )
 
     return render(
         request,
         "extractor/upload.html",
         {
-            "form": form,
+            "form":
+                form,
         },
     )
+
+
